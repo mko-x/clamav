@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *  Copyright (C) 2007-2013 Sourcefire, Inc.
  *
  *  Authors: Nigel Horne
@@ -43,6 +43,7 @@
 #include <unistd.h>
 #endif
 
+#include "clamav.h"
 #include "others.h"
 #include "mbox.h"
 #include "matcher.h"
@@ -64,13 +65,13 @@ blob *
 blobCreate(void)
 {
 #ifdef CL_DEBUG
-    blob *b = (blob *)cli_calloc(1, sizeof(blob));
+    blob *b = (blob *)calloc(1, sizeof(blob));
     if (b)
         b->magic = BLOBCLASS;
     cli_dbgmsg("blobCreate\n");
     return b;
 #else
-    return (blob *)cli_calloc(1, sizeof(blob));
+    return (blob *)calloc(1, sizeof(blob));
 #endif
 }
 
@@ -153,7 +154,7 @@ void blobSetFilename(blob *b, const char *dir, const char *filename)
     if (b->name)
         free(b->name);
 
-    b->name = cli_strdup(filename);
+    b->name = cli_safer_strdup(filename);
 
     if (b->name)
         sanitiseName(b->name);
@@ -209,7 +210,7 @@ int blobAddData(blob *b, const unsigned char *data, size_t len)
 #if HAVE_CLI_GETPAGESIZE
     if (pagesize == 0) {
         pagesize = cli_getpagesize();
-        if (pagesize == 0)
+        if (pagesize <= 0)
             pagesize = 4096;
     }
     growth = pagesize;
@@ -224,13 +225,13 @@ int blobAddData(blob *b, const unsigned char *data, size_t len)
         assert(b->size == 0);
 
         b->size = growth;
-        b->data = cli_malloc(growth);
+        b->data = cli_max_malloc(growth);
         if (NULL == b->data) {
             b->size = 0;
             return -1;
         }
     } else if (b->size < b->len + (off_t)len) {
-        unsigned char *p = cli_realloc(b->data, b->size + growth);
+        unsigned char *p = cli_max_realloc(b->data, b->size + growth);
 
         if (p == NULL)
             return -1;
@@ -244,13 +245,13 @@ int blobAddData(blob *b, const unsigned char *data, size_t len)
         assert(b->size == 0);
 
         b->size = (off_t)len * 4;
-        b->data = cli_malloc(b->size);
+        b->data = cli_max_malloc(b->size);
         if (NULL == b->data) {
             b->size = 0;
             return -1;
         }
     } else if (b->size < b->len + (off_t)len) {
-        unsigned char *p = cli_realloc(b->data, b->size + (len * 4));
+        unsigned char *p = cli_max_realloc(b->data, b->size + (len * 4));
 
         if (p == NULL)
             return -1;
@@ -318,7 +319,7 @@ void blobClose(blob *b)
                        (unsigned long)b->size);
             b->size = 0;
         } else {
-            unsigned char *ptr = cli_realloc(b->data, b->len);
+            unsigned char *ptr = cli_max_realloc(b->data, b->len);
 
             if (ptr == NULL) {
                 return;
@@ -384,11 +385,11 @@ int blobGrow(blob *b, size_t len)
         assert(b->len == 0);
         assert(b->size == 0);
 
-        b->data = cli_malloc(len);
+        b->data = cli_max_malloc(len);
         if (b->data)
             b->size = (off_t)len;
     } else {
-        unsigned char *ptr = cli_realloc(b->data, b->size + len);
+        unsigned char *ptr = cli_max_realloc(b->data, b->size + len);
 
         if (ptr) {
             b->size += (off_t)len;
@@ -403,13 +404,13 @@ fileblob *
 fileblobCreate(void)
 {
 #ifdef CL_DEBUG
-    fileblob *fb = (fileblob *)cli_calloc(1, sizeof(fileblob));
+    fileblob *fb = (fileblob *)calloc(1, sizeof(fileblob));
     if (fb)
         fb->b.magic = BLOBCLASS;
     cli_dbgmsg("blobCreate\n");
     return fb;
 #else
-    return (fileblob *)cli_calloc(1, sizeof(fileblob));
+    return (fileblob *)calloc(1, sizeof(fileblob));
 #endif
 }
 
@@ -525,7 +526,7 @@ void fileblobPartialSet(fileblob *fb, const char *fullname, const char *arg)
             fb->b.len = fb->b.size = 0;
             fb->isNotEmpty         = 1;
         }
-    fb->fullname = cli_strdup(fullname);
+    fb->fullname = cli_safer_strdup(fullname);
 }
 
 void fileblobSetFilename(fileblob *fb, const char *dir, const char *filename)
@@ -597,7 +598,6 @@ int fileblobAddData(fileblob *fb, const unsigned char *data, size_t len)
                 fb->bytes_scanned += (unsigned long)len;
 
                 if ((len > 5) && cli_updatelimits(ctx, len) == CL_CLEAN && (cli_scan_buff(data, (unsigned int)len, 0, ctx->virname, ctx->engine, CL_TYPE_BINARY_DATA, NULL) == CL_VIRUS)) {
-                    cli_dbgmsg("fileblobAddData: found %s\n", cli_get_last_virus_str(ctx->virname));
                     fb->isInfected = 1;
                 }
             }
@@ -632,12 +632,10 @@ void fileblobSetCTX(fileblob *fb, cli_ctx *ctx)
  *	CL_CLEAN means unknown
  *	CL_VIRUS means infected
  */
-int fileblobScan(const fileblob *fb)
+cl_error_t fileblobScan(const fileblob *fb)
 {
-    int rc;
-    cli_ctx *ctx = fb->ctx;
+    cl_error_t rc;
     STATBUF sb;
-    int virus_found = 0;
 
     if (fb->isInfected)
         return CL_VIRUS;
@@ -655,18 +653,17 @@ int fileblobScan(const fileblob *fb)
     fflush(fb->fp);
     lseek(fb->fd, 0, SEEK_SET);
     FSTAT(fb->fd, &sb);
-    if (cli_matchmeta(fb->ctx, fb->b.name, sb.st_size, sb.st_size, 0, 0, 0, NULL) == CL_VIRUS) {
-        if (!SCAN_ALLMATCHES)
-            return CL_VIRUS;
-        virus_found = 1;
+
+    rc = cli_matchmeta(fb->ctx, fb->b.name, sb.st_size, sb.st_size, 0, 0, 0);
+    if (rc != CL_SUCCESS) {
+        return rc;
     }
 
-    rc = cli_magic_scan_desc(fb->fd, fb->fullname, fb->ctx, fb->b.name);
-    if (rc == CL_VIRUS || virus_found != 0) {
-        cli_dbgmsg("%s is infected\n", fb->fullname);
-        return CL_VIRUS;
+    rc = cli_magic_scan_desc(fb->fd, fb->fullname, fb->ctx, fb->b.name, LAYER_ATTRIBUTES_NONE);
+    if (rc != CL_SUCCESS) {
+        return rc;
     }
-    cli_dbgmsg("%s is clean\n", fb->fullname);
+
     return CL_BREAK;
 }
 
@@ -688,8 +685,9 @@ void sanitiseName(char *name)
 {
     char c;
     while ((c = *name)) {
-        if (c != '.' && c != '_' && (c > 'z' || c < '0' || (c > '9' && c < 'A') || (c > 'Z' && c < 'a')))
+        if (c != '.' && c != '_' && (c > 'z' || c < '0' || (c > '9' && c < 'A') || (c > 'Z' && c < 'a'))) {
             *name = '_';
+        }
         name++;
     }
 }

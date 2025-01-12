@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2015-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2015-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *
  *  Authors: Kevin Lin <kevlin2@cisco.com>
  *
@@ -78,8 +78,7 @@ cl_error_t cli_parsetiff(cli_ctx *ctx)
     /* acquire offset of first IFD */
     if (fmap_readn(map, &offset, offset, 4) != 4) {
         cli_dbgmsg("cli_parsetiff: Failed to acquire offset of first IFD, file appears to be truncated.\n");
-        cli_append_possibly_unwanted(ctx, "Heuristics.Broken.Media.TIFF.EOFReadingFirstIFDOffset");
-        status = CL_EPARSE;
+        status = cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Media.TIFF.EOFReadingFirstIFDOffset");
         goto done;
     }
     /* offset of the first IFD */
@@ -89,8 +88,7 @@ cl_error_t cli_parsetiff(cli_ctx *ctx)
 
     if (!offset) {
         cli_errmsg("cli_parsetiff: Invalid offset for first IFD\n");
-        cli_append_possibly_unwanted(ctx, "Heuristics.Broken.Media.TIFF.InvalidIFDOffset");
-        status = CL_EPARSE;
+        status = cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Media.TIFF.InvalidIFDOffset");
         goto done;
     }
 
@@ -99,8 +97,7 @@ cl_error_t cli_parsetiff(cli_ctx *ctx)
         /* acquire number of directory entries in current IFD */
         if (fmap_readn(map, &num_entries, offset, 2) != 2) {
             cli_dbgmsg("cli_parsetiff: Failed to acquire number of directory entries in current IFD, file appears to be truncated.\n");
-            cli_append_possibly_unwanted(ctx, "Heuristics.Broken.Media.TIFF.EOFReadingNumIFDDirectoryEntries");
-            status = CL_EPARSE;
+            status = cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Media.TIFF.EOFReadingNumIFDDirectoryEntries");
             goto done;
         }
         offset += 2;
@@ -112,8 +109,7 @@ cl_error_t cli_parsetiff(cli_ctx *ctx)
         for (i = 0; i < num_entries; i++) {
             if (fmap_readn(map, &entry, offset, sizeof(entry)) != sizeof(entry)) {
                 cli_dbgmsg("cli_parsetiff: Failed to read next IFD entry, file appears to be truncated.\n");
-                cli_append_possibly_unwanted(ctx, "Heuristics.Broken.Media.TIFF.EOFReadingIFDEntry");
-                status = CL_EPARSE;
+                status = cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Media.TIFF.EOFReadingIFDEntry");
                 goto done;
             }
             offset += sizeof(entry);
@@ -175,7 +171,7 @@ cl_error_t cli_parsetiff(cli_ctx *ctx)
                 if (entry.value + value_size > map->len) {
                     cli_warnmsg("cli_parsetiff: TFD entry field %u exceeds bounds of TIFF file [%llu > %llu]\n",
                                 i, (long long unsigned)(entry.value + value_size), (long long unsigned)map->len);
-                    status = cli_append_virus(ctx, "Heuristics.Broken.Media.TIFF.OutOfBoundsAccess");
+                    status = cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Media.TIFF.OutOfBoundsAccess");
                     goto done;
                 }
             }
@@ -187,9 +183,8 @@ cl_error_t cli_parsetiff(cli_ctx *ctx)
 
         /* acquire next IFD location, gets 0 if last IFD */
         if (fmap_readn(map, &offset, offset, sizeof(offset)) != sizeof(offset)) {
-            cli_dbgmsg("cli_parsetiff: Failed to aquire next IFD location, file appears to be truncated.\n");
-            cli_append_possibly_unwanted(ctx, "Heuristics.Broken.Media.TIFF.EOFReadingChunkCRC");
-            status = CL_EPARSE;
+            cli_dbgmsg("cli_parsetiff: Failed to acquire next IFD location, file appears to be truncated.\n");
+            status = cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Media.TIFF.EOFReadingChunkCRC");
             goto done;
         }
         offset = tiff32_to_host(big_endian, offset);
@@ -198,8 +193,7 @@ cl_error_t cli_parsetiff(cli_ctx *ctx)
             /*If the offsets are not in order, that is suspicious.*/
             if (last_offset >= offset) {
                 cli_dbgmsg("cli_parsetiff: Next offset is before current offset, file appears to be malformed.\n");
-                cli_append_possibly_unwanted(ctx, "Heuristics.Broken.Media.TIFF.OutOfOrderIFDOffset");
-                status = CL_EPARSE;
+                status = cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Media.TIFF.OutOfOrderIFDOffset");
                 goto done;
             }
         }
@@ -210,10 +204,6 @@ cl_error_t cli_parsetiff(cli_ctx *ctx)
     status = CL_CLEAN;
 
 done:
-    if (status == CL_EPARSE) {
-        /* We added with cli_append_possibly_unwanted so it will alert at the end if nothing else matches. */
-        status = CL_CLEAN;
-    }
 
     return status;
 }

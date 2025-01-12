@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *  Copyright (C) 2011-2013 Sourcefire, Inc.
  *
  *  The code is based on Flasm, command line assembler & disassembler of Flash
@@ -288,10 +288,10 @@ static cl_error_t scanzws(cli_ctx *ctx, struct swf_file_hdr *hdr)
                    hdr->filesize, (long long unsigned)outsize);
     }
 
-    ret = cli_magic_scan_desc(fd, tmpname, ctx, NULL);
+    ret = cli_magic_scan_desc(fd, tmpname, ctx, NULL, LAYER_ATTRIBUTES_NONE);
 
     close(fd);
-    if (!(ctx->engine->keeptmp)) {
+    if (!ctx->engine->keeptmp) {
         if (cli_unlink(tmpname)) {
             free(tmpname);
             return CL_EUNLINK;
@@ -424,7 +424,7 @@ static cl_error_t scancws(cli_ctx *ctx, struct swf_file_hdr *hdr)
                    hdr->filesize, outsize);
     }
 
-    ret = cli_magic_scan_desc(fd, tmpname, ctx, NULL);
+    ret = cli_magic_scan_desc(fd, tmpname, ctx, NULL, LAYER_ATTRIBUTES_NONE);
 
     close(fd);
     if (!ctx->engine->keeptmp) {

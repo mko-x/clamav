@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *  Copyright (C) 2007-2013 Sourcefire, Inc.
  *
  *  Authors: Tomasz Kojm
@@ -209,7 +209,7 @@ static int sort_list_fn(const void *a, const void *b)
     RETURN_RES_IF_NE(patt_a->partno, patt_b->partno);
 
     /* 4. Keep close patterns close
-     * (this is for performace) */
+     * (this is for performance) */
     RETURN_RES_IF_NE(patt_a, patt_b);
 
     return 0;
@@ -242,7 +242,7 @@ static int sort_heads_by_partno_fn(const void *a, const void *b)
     }
 
     /* 3. Keep close patterns close
-     * (this is for performace) */
+     * (this is for performance) */
     RETURN_RES_IF_NE(patt_a, patt_b);
 
     return 0;
@@ -305,6 +305,57 @@ static void link_lists(struct cli_matcher *root)
     }
 }
 
+/**
+ * @brief Inserts newly malloced trans node in the array of nodes to be freed on
+ * cleanup.  There is no verification that the added node is not already in the
+ * list, so that is up to the caller.
+ *
+ * @param root      The matcher root.
+ * @param trans     The trans node to be tracked.
+ * @return bool
+ */
+static bool store_trans_node(struct cli_matcher *root, struct cli_ac_node **trans)
+{
+    bool bRet = false;
+
+    if (root->trans_cnt + 1 > root->trans_capacity) {
+        size_t newCapacity        = root->trans_capacity + 1024;
+        struct cli_ac_node ***ret = MPOOL_REALLOC(root->mempool, root->trans_array, newCapacity * sizeof(struct cli_ac_node **));
+        if (NULL == ret) {
+            cli_errmsg("cli_ac_addpatt: Can't allocate memory for cleanup storage of trans\n");
+            goto done;
+        }
+        root->trans_capacity = newCapacity;
+        root->trans_array    = ret;
+    }
+
+    root->trans_array[root->trans_cnt++] = trans;
+
+    bRet = true;
+done:
+    return bRet;
+}
+
+/**
+ * @brief Frees all trans nodes for cleanup.
+ * cleanup.
+ *
+ * @param root      The matcher root.
+ */
+static void free_trans_nodes(struct cli_matcher *root)
+{
+    uint32_t i = 0;
+
+    for (i = 0; i < root->trans_cnt; i++) {
+        MPOOL_FREE(root->mempool, root->trans_array[i]);
+    }
+
+    MPOOL_FREE(root->mempool, root->trans_array);
+    root->trans_array    = NULL;
+    root->trans_cnt      = 0;
+    root->trans_capacity = 0;
+}
+
 static inline struct cli_ac_node *add_new_node(struct cli_matcher *root, uint16_t i, uint16_t len)
 {
     struct cli_ac_node *new;
@@ -320,6 +371,12 @@ static inline struct cli_ac_node *add_new_node(struct cli_matcher *root, uint16_
         new->trans = (struct cli_ac_node **)MPOOL_CALLOC(root->mempool, 256, sizeof(struct cli_ac_node *));
         if (!new->trans) {
             cli_errmsg("cli_ac_addpatt: Can't allocate memory for new->trans\n");
+            MPOOL_FREE(root->mempool, new);
+            return NULL;
+        }
+
+        if (!store_trans_node(root, new->trans)) {
+            /* Error printed in store_trans_node */
             MPOOL_FREE(root->mempool, new);
             return NULL;
         }
@@ -357,6 +414,10 @@ static int cli_ac_addpatt_recursive(struct cli_matcher *root, struct cli_ac_patt
         pt->trans = (struct cli_ac_node **)MPOOL_CALLOC(root->mempool, 256, sizeof(struct cli_ac_node *));
         if (!pt->trans) {
             cli_errmsg("cli_ac_addpatt: Can't allocate memory for pt->trans\n");
+            return CL_EMEM;
+        }
+        if (!store_trans_node(root, pt->trans)) {
+            /* Error printed in store_trans_node */
             return CL_EMEM;
         }
     }
@@ -433,7 +494,7 @@ static int bfs_enqueue(struct bfs_list **bfs, struct bfs_list **last, struct cli
 {
     struct bfs_list *new;
 
-    new = (struct bfs_list *)cli_malloc(sizeof(struct bfs_list));
+    new = (struct bfs_list *)malloc(sizeof(struct bfs_list));
     if (!new) {
         cli_errmsg("bfs_enqueue: Can't allocate memory for bfs_list\n");
         return CL_EMEM;
@@ -654,32 +715,6 @@ static void ac_free_special(struct cli_ac_patt *p)
     MPOOL_FREE(mempool, p->special_table);
 }
 
-/*
- * This is a test to see if we have already seen this pointer.  If we have, we
- * have already freed it, so don't do it again (double-free)
- */
-static int need_to_free_trans(struct cli_matcher *root, const size_t idx)
-{
-    size_t j;
-    size_t min = idx;
-    if (root->ac_nodes < idx) {
-        /*Should never happen, but check just to be safe.*/
-        min = root->ac_nodes;
-    }
-
-    for (j = 0; j < min; j++) {
-        if (NULL == root->ac_nodetable[j]) {
-            continue;
-        }
-
-        if (root->ac_nodetable[idx]->trans == root->ac_nodetable[j]->trans) {
-            return 0;
-        }
-    }
-
-    return 1;
-}
-
 void cli_ac_free(struct cli_matcher *root)
 {
     uint32_t i               = 0;
@@ -708,17 +743,6 @@ void cli_ac_free(struct cli_matcher *root)
         MPOOL_FREE(root->mempool, root->ac_reloff);
     }
 
-    /* Freeing trans nodes must be done before freeing table nodes! */
-    for (i = 0; i < root->ac_nodes; i++) {
-        if (!IS_LEAF(root->ac_nodetable[i]) &&
-            root->ac_root->trans != root->ac_nodetable[i]->trans) {
-
-            if (need_to_free_trans(root, i)) {
-                MPOOL_FREE(root->mempool, root->ac_nodetable[i]->trans);
-            }
-        }
-    }
-
     for (i = 0; i < root->ac_lists; i++) {
         MPOOL_FREE(root->mempool, root->ac_listtable[i]);
     }
@@ -743,6 +767,8 @@ void cli_ac_free(struct cli_matcher *root)
     if (root->filter) {
         MPOOL_FREE(root->mempool, root->filter);
     }
+
+    free_trans_nodes(root);
 }
 
 /*
@@ -1386,7 +1412,7 @@ cl_error_t cli_ac_initdata(struct cli_ac_data *data, uint32_t partsigs, uint32_t
 
     data->reloffsigs = reloffsigs;
     if (reloffsigs) {
-        data->offset = (uint32_t *)cli_malloc(reloffsigs * 2 * sizeof(uint32_t));
+        data->offset = (uint32_t *)malloc(reloffsigs * 2 * sizeof(uint32_t));
         if (!data->offset) {
             cli_errmsg("cli_ac_init: Can't allocate memory for data->offset\n");
             return CL_EMEM;
@@ -1397,7 +1423,7 @@ cl_error_t cli_ac_initdata(struct cli_ac_data *data, uint32_t partsigs, uint32_t
 
     data->partsigs = partsigs;
     if (partsigs) {
-        data->offmatrix = (uint32_t ***)cli_calloc(partsigs, sizeof(uint32_t **));
+        data->offmatrix = (uint32_t ***)calloc(partsigs, sizeof(uint32_t **));
         if (!data->offmatrix) {
             cli_errmsg("cli_ac_init: Can't allocate memory for data->offmatrix\n");
 
@@ -1410,7 +1436,7 @@ cl_error_t cli_ac_initdata(struct cli_ac_data *data, uint32_t partsigs, uint32_t
 
     data->lsigs = lsigs;
     if (lsigs) {
-        data->lsigcnt = (uint32_t **)cli_malloc(lsigs * sizeof(uint32_t *));
+        data->lsigcnt = (uint32_t **)malloc(lsigs * sizeof(uint32_t *));
         if (!data->lsigcnt) {
             if (partsigs)
                 free(data->offmatrix);
@@ -1421,7 +1447,7 @@ cl_error_t cli_ac_initdata(struct cli_ac_data *data, uint32_t partsigs, uint32_t
             cli_errmsg("cli_ac_init: Can't allocate memory for data->lsigcnt\n");
             return CL_EMEM;
         }
-        data->lsigcnt[0] = (uint32_t *)cli_calloc(lsigs * 64, sizeof(uint32_t));
+        data->lsigcnt[0] = (uint32_t *)calloc(lsigs * 64, sizeof(uint32_t));
         if (!data->lsigcnt[0]) {
             free(data->lsigcnt);
             if (partsigs)
@@ -1435,7 +1461,7 @@ cl_error_t cli_ac_initdata(struct cli_ac_data *data, uint32_t partsigs, uint32_t
         }
         for (i = 1; i < lsigs; i++)
             data->lsigcnt[i] = data->lsigcnt[0] + 64 * i;
-        data->yr_matches = (uint8_t *)cli_calloc(lsigs, sizeof(uint8_t));
+        data->yr_matches = (uint8_t *)calloc(lsigs, sizeof(uint8_t));
         if (data->yr_matches == NULL) {
             free(data->lsigcnt[0]);
             free(data->lsigcnt);
@@ -1448,7 +1474,7 @@ cl_error_t cli_ac_initdata(struct cli_ac_data *data, uint32_t partsigs, uint32_t
         }
 
         /* subsig offsets */
-        data->lsig_matches = (struct cli_lsig_matches **)cli_calloc(lsigs, sizeof(struct cli_lsig_matches *));
+        data->lsig_matches = (struct cli_lsig_matches **)calloc(lsigs, sizeof(struct cli_lsig_matches *));
         if (!data->lsig_matches) {
             free(data->yr_matches);
             free(data->lsigcnt[0]);
@@ -1462,8 +1488,8 @@ cl_error_t cli_ac_initdata(struct cli_ac_data *data, uint32_t partsigs, uint32_t
             cli_errmsg("cli_ac_init: Can't allocate memory for data->lsig_matches\n");
             return CL_EMEM;
         }
-        data->lsigsuboff_last  = (uint32_t **)cli_malloc(lsigs * sizeof(uint32_t *));
-        data->lsigsuboff_first = (uint32_t **)cli_malloc(lsigs * sizeof(uint32_t *));
+        data->lsigsuboff_last  = (uint32_t **)malloc(lsigs * sizeof(uint32_t *));
+        data->lsigsuboff_first = (uint32_t **)malloc(lsigs * sizeof(uint32_t *));
         if (!data->lsigsuboff_last || !data->lsigsuboff_first) {
             free(data->lsig_matches);
             free(data->lsigsuboff_last);
@@ -1480,8 +1506,8 @@ cl_error_t cli_ac_initdata(struct cli_ac_data *data, uint32_t partsigs, uint32_t
             cli_errmsg("cli_ac_init: Can't allocate memory for data->lsigsuboff_(last|first)\n");
             return CL_EMEM;
         }
-        data->lsigsuboff_last[0]  = (uint32_t *)cli_calloc(lsigs * 64, sizeof(uint32_t));
-        data->lsigsuboff_first[0] = (uint32_t *)cli_calloc(lsigs * 64, sizeof(uint32_t));
+        data->lsigsuboff_last[0]  = (uint32_t *)calloc(lsigs * 64, sizeof(uint32_t));
+        data->lsigsuboff_first[0] = (uint32_t *)calloc(lsigs * 64, sizeof(uint32_t));
         if (!data->lsigsuboff_last[0] || !data->lsigsuboff_first[0]) {
             free(data->lsig_matches);
             free(data->lsigsuboff_last[0]);
@@ -1523,7 +1549,7 @@ cl_error_t cli_ac_initdata(struct cli_ac_data *data, uint32_t partsigs, uint32_t
 
 cl_error_t cli_ac_caloff(const struct cli_matcher *root, struct cli_ac_data *data, const struct cli_target_info *info)
 {
-    int ret;
+    cl_error_t ret;
     unsigned int i;
     struct cli_ac_patt *patt;
 
@@ -1534,7 +1560,7 @@ cl_error_t cli_ac_caloff(const struct cli_matcher *root, struct cli_ac_data *dat
         patt = root->ac_reloff[i];
         if (!info) {
             data->offset[patt->offset_min] = CLI_OFF_NONE;
-        } else if ((ret = cli_caloff(NULL, info, root->type, patt->offdata, &data->offset[patt->offset_min], &data->offset[patt->offset_max]))) {
+        } else if (CL_SUCCESS != (ret = cli_caloff(NULL, info, root->type, patt->offdata, &data->offset[patt->offset_min], &data->offset[patt->offset_max]))) {
             cli_errmsg("cli_ac_caloff: Can't calculate relative offset in signature for %s\n", patt->virname);
             return ret;
         } else if ((data->offset[patt->offset_min] != CLI_OFF_NONE) && (data->offset[patt->offset_min] + patt->length[1] > info->fsize)) {
@@ -1611,7 +1637,7 @@ inline static int ac_addtype(struct cli_matched_type **list, cli_file_t type, of
         return CL_SUCCESS;
     }
 
-    if (!(tnode = cli_calloc(1, sizeof(struct cli_matched_type)))) {
+    if (!(tnode = calloc(1, sizeof(struct cli_matched_type)))) {
         cli_errmsg("cli_ac_addtype: Can't allocate memory for new type node\n");
         return CL_EMEM;
     }
@@ -1678,28 +1704,28 @@ cl_error_t lsig_sub_matched(const struct cli_matcher *root, struct cli_ac_data *
 
             ls_matches = mdata->lsig_matches[lsig_id];
             if (ls_matches == NULL) { /* allocate cli_lsig_matches */
-                ls_matches = mdata->lsig_matches[lsig_id] = (struct cli_lsig_matches *)cli_calloc(1, sizeof(struct cli_lsig_matches) +
-                                                                                                         (ac_lsig->tdb.subsigs - 1) * sizeof(struct cli_subsig_matches *));
+                ls_matches = mdata->lsig_matches[lsig_id] = (struct cli_lsig_matches *)calloc(1, sizeof(struct cli_lsig_matches) +
+                                                                                                     (ac_lsig->tdb.subsigs - 1) * sizeof(struct cli_subsig_matches *));
                 if (ls_matches == NULL) {
-                    cli_errmsg("lsig_sub_matched: cli_calloc failed for cli_lsig_matches\n");
+                    cli_errmsg("lsig_sub_matched: calloc failed for cli_lsig_matches\n");
                     return CL_EMEM;
                 }
                 ls_matches->subsigs = ac_lsig->tdb.subsigs;
             }
             ss_matches = ls_matches->matches[subsig_id];
             if (ss_matches == NULL) { /*  allocate cli_subsig_matches */
-                ss_matches = ls_matches->matches[subsig_id] = cli_malloc(sizeof(struct cli_subsig_matches));
+                ss_matches = ls_matches->matches[subsig_id] = malloc(sizeof(struct cli_subsig_matches));
                 if (ss_matches == NULL) {
-                    cli_errmsg("lsig_sub_matched: cli_malloc failed for cli_subsig_matches struct\n");
+                    cli_errmsg("lsig_sub_matched: malloc failed for cli_subsig_matches struct\n");
                     return CL_EMEM;
                 }
                 ss_matches->next = 0;
                 ss_matches->last = sizeof(ss_matches->offsets) / sizeof(uint32_t) - 1;
             }
             if (ss_matches->next > ss_matches->last) { /* cli_matches out of space? realloc */
-                ss_matches = ls_matches->matches[subsig_id] = cli_realloc(ss_matches, sizeof(struct cli_subsig_matches) + sizeof(uint32_t) * ss_matches->last * 2);
+                ss_matches = ls_matches->matches[subsig_id] = realloc(ss_matches, sizeof(struct cli_subsig_matches) + sizeof(uint32_t) * ss_matches->last * 2);
                 if (ss_matches == NULL) {
-                    cli_errmsg("lsig_sub_matched: cli_realloc failed for cli_subsig_matches struct\n");
+                    cli_errmsg("lsig_sub_matched: realloc failed for cli_subsig_matches struct\n");
                     return CL_EMEM;
                 }
                 ss_matches->last = sizeof(ss_matches->offsets) / sizeof(uint32_t) + ss_matches->last * 2 - 1;
@@ -1860,7 +1886,7 @@ cl_error_t cli_ac_scanbuff(
 
                         realoff = offset + matchstart;
                         if (pt->offdata[0] == CLI_OFF_VERSION) {
-                            if (!cli_hashset_contains_maybe_noalloc(mdata->vinfo, realoff)) {
+                            if (false == cli_hashset_contains_maybe_noalloc(mdata->vinfo, realoff)) {
                                 ptN = ptN->next_same;
                                 continue;
                             }
@@ -1900,13 +1926,13 @@ cl_error_t cli_ac_scanbuff(
 
                             /* sparsely populated matrix, so allocate and initialize if NULL */
                             if (!mdata->offmatrix[pt->sigid - 1]) {
-                                mdata->offmatrix[pt->sigid - 1] = cli_malloc(pt->parts * sizeof(int32_t *));
+                                mdata->offmatrix[pt->sigid - 1] = malloc(pt->parts * sizeof(int32_t *));
                                 if (!mdata->offmatrix[pt->sigid - 1]) {
                                     cli_errmsg("cli_ac_scanbuff: Can't allocate memory for mdata->offmatrix[%u]\n", pt->sigid - 1);
                                     return CL_EMEM;
                                 }
 
-                                mdata->offmatrix[pt->sigid - 1][0] = cli_malloc(pt->parts * (CLI_DEFAULT_AC_TRACKLEN + 2) * sizeof(uint32_t));
+                                mdata->offmatrix[pt->sigid - 1][0] = malloc(pt->parts * (CLI_DEFAULT_AC_TRACKLEN + 2) * sizeof(uint32_t));
                                 if (!mdata->offmatrix[pt->sigid - 1][0]) {
                                     cli_errmsg("cli_ac_scanbuff: Can't allocate memory for mdata->offmatrix[%u][0]\n", pt->sigid - 1);
                                     free(mdata->offmatrix[pt->sigid - 1]);
@@ -1968,12 +1994,13 @@ cl_error_t cli_ac_scanbuff(
                                     if (pt->type == CL_TYPE_IGNORED && (!pt->rtype || ftype == pt->rtype))
                                         return CL_TYPE_IGNORED;
 
-                                    if ((pt->type > type || pt->type >= CL_TYPE_SFX || pt->type == CL_TYPE_MSEXE) && (!pt->rtype || ftype == pt->rtype)) {
+                                    if ((pt->type > type || pt->type >= CL_TYPE_SFX || pt->type == CL_TYPE_MSEXE) &&
+                                        (pt->rtype == CL_TYPE_ANY || ftype == pt->rtype)) {
+
                                         cli_dbgmsg("Matched signature for file type %s\n", pt->virname);
                                         type = pt->type;
-                                        if (ftoffset &&
-                                            (!*ftoffset || (*ftoffset)->cnt < MAX_EMBEDDED_OBJ || type == CL_TYPE_ZIPSFX) &&
-                                            (type >= CL_TYPE_SFX || ((ftype == CL_TYPE_MSEXE || ftype == CL_TYPE_ZIP || ftype == CL_TYPE_MSOLE2) && type == CL_TYPE_MSEXE))) {
+                                        if ((ftoffset != NULL) &&
+                                            ((*ftoffset == NULL) || (*ftoffset)->cnt < MAX_EMBEDDED_OBJ || type == CL_TYPE_ZIPSFX) && (type >= CL_TYPE_SFX || ((ftype == CL_TYPE_MSEXE || ftype == CL_TYPE_ZIP || ftype == CL_TYPE_MSOLE2) && type == CL_TYPE_MSEXE))) {
                                             /* FIXME: the first offset in the array is most likely the correct one but
                                              * it may happen it is not
                                              */
@@ -2031,14 +2058,16 @@ cl_error_t cli_ac_scanbuff(
 
                         } else { /* old type signature */
                             if (pt->type) {
-                                if (pt->type == CL_TYPE_IGNORED && (!pt->rtype || ftype == pt->rtype))
+                                if (pt->type == CL_TYPE_IGNORED && (pt->rtype == CL_TYPE_ANY || ftype == pt->rtype))
                                     return CL_TYPE_IGNORED;
 
-                                if ((pt->type > type || pt->type >= CL_TYPE_SFX || pt->type == CL_TYPE_MSEXE) && (!pt->rtype || ftype == pt->rtype)) {
+                                if ((pt->type > type || pt->type >= CL_TYPE_SFX || pt->type == CL_TYPE_MSEXE) &&
+                                    (pt->rtype == CL_TYPE_ANY || ftype == pt->rtype)) {
 
                                     cli_dbgmsg("Matched signature for file type %s at %u\n", pt->virname, realoff);
                                     type = pt->type;
-                                    if (ftoffset && (!*ftoffset || (*ftoffset)->cnt < MAX_EMBEDDED_OBJ || type == CL_TYPE_ZIPSFX) && (type == CL_TYPE_MBR || type >= CL_TYPE_SFX || ((ftype == CL_TYPE_MSEXE || ftype == CL_TYPE_ZIP || ftype == CL_TYPE_MSOLE2) && type == CL_TYPE_MSEXE))) {
+                                    if ((ftoffset != NULL) &&
+                                        ((*ftoffset == NULL) || (*ftoffset)->cnt < MAX_EMBEDDED_OBJ || type == CL_TYPE_ZIPSFX) && (type == CL_TYPE_MBR || type >= CL_TYPE_SFX || ((ftype == CL_TYPE_MSEXE || ftype == CL_TYPE_ZIP || ftype == CL_TYPE_MSOLE2) && type == CL_TYPE_MSEXE))) {
 
                                         if (ac_addtype(ftoffset, type, realoff, ctx))
                                             return CL_EMEM;
@@ -2301,9 +2330,13 @@ inline static int ac_uicmp(uint16_t *a, size_t alen, uint16_t *b, size_t blen, i
 /* add new generic alternate node to special */
 inline static int ac_addspecial_add_alt_node(const char *subexpr, uint8_t sigopts, struct cli_ac_special *special, struct cli_matcher *root)
 {
-    struct cli_alt_node *newnode, **prev, *ins;
-    uint16_t *s;
-    int i, cmp, wild;
+    struct cli_alt_node *newnode = NULL;
+    struct cli_alt_node **prev   = NULL;
+    struct cli_alt_node *ins     = NULL;
+    uint16_t *s                  = NULL;
+    int i                        = 0;
+    int cmp                      = 0;
+    int wild                     = 0;
 
 #ifndef USE_MPOOL
     UNUSEDPARAM(root);
@@ -2486,7 +2519,7 @@ inline static int ac_special_altstr(const char *hexpr, uint8_t sigopts, struct c
     char *hexprcpy, *h, *c;
     int i, ret, num, fixed, slen;
 
-    if (!(hexprcpy = cli_strdup(hexpr))) {
+    if (!(hexprcpy = cli_safer_strdup(hexpr))) {
         cli_errmsg("ac_special_altstr: Can't duplicate alternate expression\n");
         return CL_EDUP;
     }
@@ -2556,7 +2589,7 @@ inline static int ac_special_altstr(const char *hexpr, uint8_t sigopts, struct c
         special->type = AC_SPECIAL_ALT_STR;
 
         /* allocate reusable subexpr */
-        if (!(subexpr = cli_calloc(slen + 1, sizeof(char)))) {
+        if (!(subexpr = calloc(slen + 1, sizeof(char)))) {
             cli_errmsg("ac_special_altstr: Can't allocate subexpr container\n");
             free(hexprcpy);
             return CL_EMEM;
@@ -2613,7 +2646,7 @@ cl_error_t cli_ac_addsig(struct cli_matcher *root, const char *virname, const ch
     }
 
     if (strchr(hexsig, '[')) {
-        if (!(hexcpy = cli_strdup(hexsig))) {
+        if (!(hexcpy = cli_safer_strdup(hexsig))) {
             MPOOL_FREE(root->mempool, new);
             return CL_EMEM;
         }
@@ -2697,7 +2730,7 @@ cl_error_t cli_ac_addsig(struct cli_matcher *root, const char *virname, const ch
             return error;
         }
 
-        hex = cli_strdup(hex);
+        hex = cli_safer_strdup(hex);
         free(hexcpy);
         if (!hex) {
             MPOOL_FREE(root->mempool, new);
@@ -2712,13 +2745,13 @@ cl_error_t cli_ac_addsig(struct cli_matcher *root, const char *virname, const ch
 
         if (hex) {
             hexcpy = hex;
-        } else if (!(hexcpy = cli_strdup(hexsig))) {
+        } else if (!(hexcpy = cli_safer_strdup(hexsig))) {
             MPOOL_FREE(root->mempool, new);
             return CL_EMEM;
         }
 
         hexnewsz = strlen(hexsig) + 1;
-        if (!(hexnew = (char *)cli_calloc(1, hexnewsz))) {
+        if (!(hexnew = (char *)calloc(1, hexnewsz))) {
             MPOOL_FREE(root->mempool, new);
             free(hexcpy);
             return CL_EMEM;
@@ -2918,6 +2951,7 @@ cl_error_t cli_ac_addsig(struct cli_matcher *root, const char *virname, const ch
             cli_warnmsg("cli_ac_addsig: cannot use filter for trie\n");
             MPOOL_FREE(root->mempool, root->filter);
             root->filter = NULL;
+            return CL_EMALFDB;
         }
 
         /* TODO: should this affect maxpatlen? */
@@ -3012,7 +3046,7 @@ cl_error_t cli_ac_addsig(struct cli_matcher *root, const char *virname, const ch
             return CL_EMALFDB;
         }
 
-        // Store those intial bytes as the pattern "prefix" (the stuff before what goes in the AC Trie)
+        // Store those initial bytes as the pattern "prefix" (the stuff before what goes in the AC Trie)
         new->prefix = new->pattern;
         // The "prefix" length is the number of bytes before the starting position of the pattern that goes in the AC Trie.
         new->prefix_length[0] = ppos;

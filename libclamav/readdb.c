@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *  Copyright (C) 2007-2013 Sourcefire, Inc.
  *  Copyright (C) 2002-2007 Tomasz Kojm <tkojm@clamav.net>
  *
@@ -114,9 +114,9 @@ char *cli_virname(const char *virname, unsigned int official)
     }
 
     if (official)
-        return cli_strdup(virname);
+        return cli_safer_strdup(virname);
 
-    newname = (char *)cli_malloc(strlen(virname) + 11 + 1);
+    newname = (char *)malloc(strlen(virname) + 11 + 1);
     if (!newname) {
         cli_errmsg("cli_virname: Can't allocate memory for newname\n");
         return NULL;
@@ -127,7 +127,7 @@ char *cli_virname(const char *virname, unsigned int official)
 
 cl_error_t cli_sigopts_handler(struct cli_matcher *root, const char *virname, const char *hexsig,
                                uint8_t sigopts, uint16_t rtype, uint16_t type,
-                               const char *offset, uint8_t target, const uint32_t *lsigid, unsigned int options)
+                               const char *offset, const uint32_t *lsigid, unsigned int options)
 {
     char *hexcpy, *start, *end, *mid;
     unsigned int i;
@@ -142,7 +142,7 @@ cl_error_t cli_sigopts_handler(struct cli_matcher *root, const char *virname, co
         return CL_EPARSE;
     }
 
-    hexcpy = cli_strdup(hexsig);
+    hexcpy = cli_safer_strdup(hexsig);
     if (!hexcpy)
         return CL_EMEM;
 
@@ -156,7 +156,7 @@ cl_error_t cli_sigopts_handler(struct cli_matcher *root, const char *virname, co
         /* FULLWORD regex sigopt handling */
         if (sigopts & ACPATT_OPTION_FULLWORD) {
             size_t ovrlen = strlen(hexcpy) + 21;
-            char *hexovr  = cli_calloc(ovrlen, sizeof(char));
+            char *hexovr  = calloc(ovrlen, sizeof(char));
             if (!hexovr) {
                 free(hexcpy);
                 return CL_EMEM;
@@ -173,7 +173,7 @@ cl_error_t cli_sigopts_handler(struct cli_matcher *root, const char *virname, co
         /* NOCASE sigopt is passed onto the regex-opt handler */
         if (sigopts & ACPATT_OPTION_NOCASE) {
             size_t ovrlen = strlen(hexcpy) + 2;
-            char *hexovr  = cli_calloc(ovrlen, sizeof(char));
+            char *hexovr  = calloc(ovrlen, sizeof(char));
             if (!hexovr) {
                 free(hexcpy);
                 return CL_EMEM;
@@ -191,7 +191,7 @@ cl_error_t cli_sigopts_handler(struct cli_matcher *root, const char *virname, co
             return CL_EMALFDB;
         }
 
-        ret = cli_add_content_match_pattern(root, virname, hexcpy, sigopts, rtype, type, offset, target, lsigid, options);
+        ret = cli_add_content_match_pattern(root, virname, hexcpy, sigopts, rtype, type, offset, lsigid, options);
         free(hexcpy);
         return ret;
     }
@@ -203,7 +203,7 @@ cl_error_t cli_sigopts_handler(struct cli_matcher *root, const char *virname, co
 
     if (start != end && mid && (*(++mid) == '#' || !strncmp(mid, ">>", 2) || !strncmp(mid, "<<", 2) || !strncmp(mid, "0#", 2))) {
         /* TODO byte compare currently does not have support for sigopts, pass through */
-        ret = cli_add_content_match_pattern(root, virname, hexcpy, sigopts, rtype, type, offset, target, lsigid, options);
+        ret = cli_add_content_match_pattern(root, virname, hexcpy, sigopts, rtype, type, offset, lsigid, options);
         free(hexcpy);
         return ret;
     }
@@ -213,7 +213,7 @@ cl_error_t cli_sigopts_handler(struct cli_matcher *root, const char *virname, co
     if (sigopts & ACPATT_OPTION_FULLWORD) {
         char *rechar;
         size_t ovrlen = strlen(hexcpy) + 7;
-        char *hexovr  = cli_calloc(ovrlen, sizeof(char));
+        char *hexovr  = calloc(ovrlen, sizeof(char));
         if (!hexovr) {
             free(hexcpy);
             return CL_EMEM;
@@ -244,8 +244,8 @@ cl_error_t cli_sigopts_handler(struct cli_matcher *root, const char *virname, co
      */
     if (sigopts & ACPATT_OPTION_WIDE) {
         size_t hexcpylen = strlen(hexcpy);
-        size_t ovrlen = 2 * hexcpylen + 1;
-        char *hexovr  = cli_calloc(ovrlen, sizeof(char));
+        size_t ovrlen    = 2 * hexcpylen + 1;
+        char *hexovr     = calloc(ovrlen, sizeof(char));
         if (!hexovr) {
             free(hexcpy);
             return CL_EMEM;
@@ -277,7 +277,7 @@ cl_error_t cli_sigopts_handler(struct cli_matcher *root, const char *virname, co
                 /* copies '(' */
                 hexovr[len] = hexcpy[i];
 
-                if (i+2 >= hexcpylen) {
+                if (i + 2 >= hexcpylen) {
                     free(hexcpy);
                     free(hexovr);
                     return CL_EMALFDB;
@@ -300,7 +300,7 @@ cl_error_t cli_sigopts_handler(struct cli_matcher *root, const char *virname, co
         }
 
         /* NOCASE sigopt is handled in cli_ac_addsig */
-        ret = cli_add_content_match_pattern(root, virname, hexovr, sigopts, rtype, type, offset, target, lsigid, options);
+        ret = cli_add_content_match_pattern(root, virname, hexovr, sigopts, rtype, type, offset, lsigid, options);
         free(hexovr);
         if (ret != CL_SUCCESS || !(sigopts & ACPATT_OPTION_ASCII)) {
             free(hexcpy);
@@ -312,7 +312,7 @@ cl_error_t cli_sigopts_handler(struct cli_matcher *root, const char *virname, co
     }
 
     /* ASCII sigopt; NOCASE sigopt is handled in cli_ac_addsig */
-    ret = cli_add_content_match_pattern(root, virname, hexcpy, sigopts, rtype, type, offset, target, lsigid, options);
+    ret = cli_add_content_match_pattern(root, virname, hexcpy, sigopts, rtype, type, offset, lsigid, options);
     free(hexcpy);
     return ret;
 }
@@ -340,26 +340,40 @@ static cl_error_t readdb_load_regex_subsignature(struct cli_matcher *root, const
     char *end    = NULL;
 
     const char *trigger, *pattern, *cflags;
-    int subtokens_count;
+
 // The maximum number of `:` delimited fields in a regex subsignature.
 #define MAX_REGEX_SUB_TOKENS 4
     char *subtokens[MAX_REGEX_SUB_TOKENS + 1];
     const char *sig;
 
-    subtokens_count = cli_ldbtokenize(hexsig, ':', MAX_REGEX_SUB_TOKENS + 1, (const char **)subtokens, 0);
-    if (!subtokens_count) {
-        cli_errmsg("Invalid or unsupported ldb subsignature format\n");
-        status = CL_EMALFDB;
-        goto done;
+    if (0 == strncmp(virname, "YARA", 4)) {
+        // Do not tokenize for ':' in yara regex strings. ':' do not have special meaning in yara regex strings.
+        // Also, Yara regex strings may use '/' without escape characters, which confuses the "within_pcre" feature of `cli_ldbtokenize()`.
+        sig = hexsig;
+
+    } else {
+        // LDB PCRE subsignatures have this structure:
+        // [Offset:]Trigger/PCRE/[Flags]
+        // We need to split on the ':' character in case the offset was specified.
+
+        size_t subtokens_count = cli_ldbtokenize(hexsig, ':', MAX_REGEX_SUB_TOKENS + 1, (const char **)subtokens, 0);
+        if (!subtokens_count) {
+            cli_errmsg("Invalid or unsupported ldb subsignature format\n");
+            status = CL_EMALFDB;
+            goto done;
+        }
+
+        if (subtokens_count == 2) {
+            // Offset was specified
+            offset = subtokens[0];
+            sig    = subtokens[1];
+        } else {
+            sig = subtokens[0];
+        }
     }
 
-    if ((subtokens_count % 2) == 0)
-        offset = subtokens[0];
-
-    sig = (subtokens_count % 2) ? subtokens[0] : subtokens[1];
-
     /* get copied */
-    hexcpy = cli_strdup(sig);
+    hexcpy = cli_safer_strdup(sig);
     if (!hexcpy) {
         status = CL_EMEM;
         goto done;
@@ -406,13 +420,13 @@ static cl_error_t readdb_load_regex_subsignature(struct cli_matcher *root, const
 
 done:
 
-    FREE(hexcpy);
+    CLI_FREE_AND_SET_NULL(hexcpy);
 
     return status;
 }
 
 cl_error_t readdb_parse_ldb_subsignature(struct cli_matcher *root, const char *virname, char *hexsig,
-                                         const char *offset, uint8_t target, const uint32_t *lsigid, unsigned int options,
+                                         const char *offset, const uint32_t *lsigid, unsigned int options,
                                          int current_subsig_index, int num_subsigs, struct cli_lsig_tdb *tdb)
 {
     cl_error_t status = CL_EPARSE;
@@ -479,7 +493,7 @@ cl_error_t readdb_parse_ldb_subsignature(struct cli_matcher *root, const char *v
             goto done;
         }
 
-        if ((ret = cli_ac_addpatt(root, patt))) {
+        if (CL_SUCCESS != (ret = cli_ac_addpatt(root, patt))) {
             MPOOL_FREE(root->mempool, patt->pattern);
             free(patt);
             status = ret;
@@ -601,9 +615,9 @@ cl_error_t readdb_parse_ldb_subsignature(struct cli_matcher *root, const char *v
         sig = (subtokens_count % 2) ? subtokens[0] : subtokens[1];
 
         if (subsig_opts) {
-            ret = cli_sigopts_handler(root, virname, sig, subsig_opts, 0, 0, offset, target, lsigid, options);
+            ret = cli_sigopts_handler(root, virname, sig, subsig_opts, 0, 0, offset, lsigid, options);
         } else {
-            ret = cli_add_content_match_pattern(root, virname, sig, 0, 0, 0, offset, target, lsigid, options);
+            ret = cli_add_content_match_pattern(root, virname, sig, 0, 0, 0, offset, lsigid, options);
         }
 
         if (CL_SUCCESS != ret) {
@@ -620,7 +634,7 @@ done:
         ffierror_free(fuzzy_hash_load_error);
     }
 
-    FREE(hexcpy);
+    CLI_FREE_AND_SET_NULL(hexcpy);
 
     return status;
 }
@@ -633,13 +647,12 @@ done:
  * @param hexsig    The string containing the regex
  * @param subsig_opts Content match pattern options. See ACPATT_* macros in matcher-ac.h.
  * @param offset    The string offset where the pattern starts
- * @param target    The clamav target type.
  * @param lsigid    An array of 2 uint32_t numbers: lsig_id and subsig_id. May be NULL for testing.
  * @param options   Database options.  See CL_DB_* macros in clamav.h.
  * @return cl_error_t
  */
 static cl_error_t readdb_parse_yara_string(struct cli_matcher *root, const char *virname, char *hexsig, uint8_t subsig_opts,
-                                           const char *offset, uint8_t target, const uint32_t *lsigid, unsigned int options)
+                                           const char *offset, const uint32_t *lsigid, unsigned int options)
 {
     cl_error_t status = CL_EPARSE;
     cl_error_t ret;
@@ -655,9 +668,9 @@ static cl_error_t readdb_parse_yara_string(struct cli_matcher *root, const char 
          * Looks like an AC/BM content match subsignature.
          */
         if (subsig_opts) {
-            ret = cli_sigopts_handler(root, virname, hexsig, subsig_opts, 0, 0, offset, target, lsigid, options);
+            ret = cli_sigopts_handler(root, virname, hexsig, subsig_opts, 0, 0, offset, lsigid, options);
         } else {
-            ret = cli_add_content_match_pattern(root, virname, hexsig, 0, 0, 0, offset, target, lsigid, options);
+            ret = cli_add_content_match_pattern(root, virname, hexsig, 0, 0, 0, offset, lsigid, options);
         }
     }
 
@@ -686,14 +699,13 @@ done:
  * @param rtype
  * @param type
  * @param offset    The string offset where the pattern starts
- * @param target    The clamav target type.
  * @param lsigid    An array of 2 uint32_t numbers: lsig_id and subsig_id. May be NULL for testing.
  * @param options   Database options.  See CL_DB_* macros in clamav.h.
  * @return cl_error_t
  */
 cl_error_t cli_add_content_match_pattern(struct cli_matcher *root, const char *virname, const char *hexsig,
                                          uint8_t sigopts, uint16_t rtype, uint16_t type,
-                                         const char *offset, uint8_t target, const uint32_t *lsigid, unsigned int options)
+                                         const char *offset, const uint32_t *lsigid, unsigned int options)
 {
     struct cli_bm_patt *bm_new;
     char *pt, *hexcpy, *n, l, r;
@@ -717,7 +729,7 @@ cl_error_t cli_add_content_match_pattern(struct cli_matcher *root, const char *v
              * Parse "{n}" wildcard - Not a "{n-m}" range-style one.
              * Replaces it with:  "??" * n  and then re-parses the modified hexsig with recursion.
              */
-            hexcpy = cli_calloc(hexlen + 2 * range, sizeof(char));
+            hexcpy = calloc(hexlen + 2 * range, sizeof(char));
             if (!hexcpy)
                 return CL_EMEM;
 
@@ -733,7 +745,7 @@ cl_error_t cli_add_content_match_pattern(struct cli_matcher *root, const char *v
             }
 
             strcat(hexcpy, ++wild);
-            ret = cli_add_content_match_pattern(root, virname, hexcpy, sigopts, rtype, type, offset, target, lsigid, options);
+            ret = cli_add_content_match_pattern(root, virname, hexcpy, sigopts, rtype, type, offset, lsigid, options);
             free(hexcpy);
 
             return ret;
@@ -783,7 +795,7 @@ cl_error_t cli_add_content_match_pattern(struct cli_matcher *root, const char *v
 
         // Make a copy of the whole pattern so that we can NULL-terminate the hexsig
         // and pass it to cli_ac_addsig() without having to pass the part-length.
-        if (!(hexcpy = cli_strdup(hexsig)))
+        if (!(hexcpy = cli_safer_strdup(hexsig)))
             return CL_EMEM;
 
         start = pt = hexcpy;
@@ -806,7 +818,7 @@ cl_error_t cli_add_content_match_pattern(struct cli_matcher *root, const char *v
                 *pt++ = 0;
             }
 
-            if ((ret = cli_ac_addsig(root, virname, start, sigopts, root->ac_partsigs, parts, i, rtype, type, mindist, maxdist, offset, lsigid, options))) {
+            if (CL_SUCCESS != (ret = cli_ac_addsig(root, virname, start, sigopts, root->ac_partsigs, parts, i, rtype, type, mindist, maxdist, offset, lsigid, options))) {
                 cli_errmsg("cli_add_content_match_pattern: Problem adding signature (1).\n");
                 error = 1;
                 break;
@@ -907,7 +919,7 @@ cl_error_t cli_add_content_match_pattern(struct cli_matcher *root, const char *v
                 return CL_EMALFDB;
             }
 
-            if ((ret = cli_ac_addsig(root, virname, pt, sigopts, root->ac_partsigs, parts, i, rtype, type, 0, 0, offset, lsigid, options))) {
+            if (CL_SUCCESS != (ret = cli_ac_addsig(root, virname, pt, sigopts, root->ac_partsigs, parts, i, rtype, type, 0, 0, offset, lsigid, options))) {
                 cli_errmsg("cli_add_content_match_pattern: Problem adding signature (2).\n");
                 free(pt);
                 return ret;
@@ -1132,7 +1144,7 @@ static char *cli_signorm(const char *signame)
         nsz = 3;
     }
 
-    new_signame = cli_calloc((nsz + 1), sizeof(char));
+    new_signame = calloc((nsz + 1), sizeof(char));
     if (!new_signame)
         return NULL;
 
@@ -1179,37 +1191,53 @@ static int cli_chkign(const struct cli_matcher *ignored, const char *signame, co
 
 static int cli_chkpua(const char *signame, const char *pua_cats, unsigned int options)
 {
-    char cat[32], *pt;
+    char cat[32], *cat_pt, *pt1, *pt2, *endsig;
     const char *sig;
+    size_t catlen;
     int ret;
+
+    cli_dbgmsg("cli_chkpua: Checking signature [%s]\n", signame);
 
     if (strncmp(signame, "PUA.", 4)) {
         cli_dbgmsg("Skipping signature %s - no PUA prefix\n", signame);
         return 1;
     }
     sig = signame + 3;
-    if (!(pt = strchr(sig + 1, '.'))) {
+    if (!(pt1 = strchr(sig + 1, '.'))) {
         cli_dbgmsg("Skipping signature %s - bad syntax\n", signame);
         return 1;
     }
-
-    if ((unsigned int)(pt - sig + 2) > sizeof(cat)) {
-        cli_dbgmsg("Skipping signature %s - too long category name\n", signame);
+    if ((pt2 = strrchr(sig + 1, '.')) != pt1) {
+        cli_dbgmsg("Signature has at least three dots [%s]\n", signame);
+    }
+    if ((unsigned int)(pt1 - sig + 2) > sizeof(cat)) {
+        cli_dbgmsg("Skipping signature %s - too long category name, length approaching %d characters\n", signame, (unsigned int)(pt1 - sig + 2));
+        return 1;
+    }
+    if ((unsigned int)(pt2 - sig + 2) > sizeof(cat)) {
+        cli_dbgmsg("Skipping signature %s - too long category name, length approaching %d characters\n", signame, (unsigned int)(pt2 - sig + 2));
         return 1;
     }
 
-    strncpy(cat, sig, pt - signame + 1);
-    cat[pt - sig + 1] = 0;
-    pt                = strstr(pua_cats, cat);
+    endsig = strrchr(sig, '.');
 
+    catlen = MIN(sizeof(cat), strlen(sig) - strlen(endsig));
+
+    memcpy(cat, sig, catlen + 1);
+
+    // Add null terminator.
+    cat[catlen + 1] = '\0';
+
+    cat_pt = strstr(cat, pua_cats);
+    cli_dbgmsg("cli_chkpua:                cat=[%s]\n", cat);
+    cli_dbgmsg("cli_chkpua:                sig=[%s]\n", sig);
     if (options & CL_DB_PUA_INCLUDE)
-        ret = pt ? 0 : 1;
+        ret = cat_pt ? 0 : 1;
     else
-        ret = pt ? 1 : 0;
+        ret = cat_pt ? 1 : 0;
 
     if (ret)
-        cli_dbgmsg("Skipping PUA signature %s - excluded category\n", signame);
-
+        cli_dbgmsg("Skipping PUA signature %s - excluded category %s\n", signame, cat);
     return ret;
 }
 
@@ -1228,7 +1256,7 @@ static cl_error_t cli_loaddb(FILE *fs, struct cl_engine *engine, unsigned int *s
     root = engine->root[0];
 
     if (engine->ignored)
-        if (!(buffer_cpy = cli_malloc(FILEBUFF))) {
+        if (!(buffer_cpy = malloc(FILEBUFF))) {
             cli_errmsg("cli_loaddb: Can't allocate memory for buffer_cpy\n");
             return CL_EMEM;
         }
@@ -1261,7 +1289,7 @@ static cl_error_t cli_loaddb(FILE *fs, struct cl_engine *engine, unsigned int *s
 
         if (*pt == '=') continue;
 
-        if (CL_SUCCESS != (ret = cli_add_content_match_pattern(root, start, pt, 0, 0, 0, "*", 0, NULL, options))) {
+        if (CL_SUCCESS != (ret = cli_add_content_match_pattern(root, start, pt, 0, 0, 0, "*", NULL, options))) {
             cli_dbgmsg("cli_loaddb: cli_add_content_match_pattern failed on line %d\n", line);
             ret = CL_EMALFDB;
             break;
@@ -1293,17 +1321,17 @@ static cl_error_t cli_loadidb(FILE *fs, struct cl_engine *engine, unsigned int *
 {
     const char *tokens[ICO_TOKENS + 1] = {0};
     char buffer[FILEBUFF] = {0}, *buffer_cpy = NULL;
-    uint8_t *hash = NULL;
+    uint8_t *hash     = NULL;
     int ret           = CL_SUCCESS;
     unsigned int line = 0, sigs = 0, tokens_count, i, size, enginesize;
-    struct icomtr *metric = NULL;
+    struct icomtr *metric        = NULL;
     struct icon_matcher *matcher = NULL;
 
     if (!(matcher = (struct icon_matcher *)MPOOL_CALLOC(engine->mempool, sizeof(*matcher), 1)))
         return CL_EMEM;
 
     if (engine->ignored)
-        if (!(buffer_cpy = cli_malloc(FILEBUFF))) {
+        if (!(buffer_cpy = malloc(FILEBUFF))) {
             cli_errmsg("cli_loadidb: Can't allocate memory for buffer_cpy\n");
             MPOOL_FREE(engine->mempool, matcher);
             return CL_EMEM;
@@ -1570,7 +1598,7 @@ static int cli_loadndb(FILE *fs, struct cl_engine *engine, unsigned int *signo, 
     const char *sig, *virname, *offset, *pt;
     struct cli_matcher *root;
     int line = 0, sigs = 0, ret = 0, tokens_count;
-    unsigned short target;
+    cli_target_t target;
     unsigned int phish = options & CL_DB_PHISHING;
 
     UNUSEDPARAM(dbname);
@@ -1579,7 +1607,7 @@ static int cli_loadndb(FILE *fs, struct cl_engine *engine, unsigned int *signo, 
         return ret;
 
     if (engine->ignored)
-        if (!(buffer_cpy = cli_malloc(FILEBUFF))) {
+        if (!(buffer_cpy = malloc(FILEBUFF))) {
             cli_errmsg("cli_loadndb: Can't allocate memory for buffer_cpy\n");
             return CL_EMEM;
         }
@@ -1647,19 +1675,19 @@ static int cli_loadndb(FILE *fs, struct cl_engine *engine, unsigned int *signo, 
             ret = CL_EMALFDB;
             break;
         }
-        target = (unsigned short)atoi(pt);
+        target = (cli_target_t)atoi(pt);
 
-        if (target >= CLI_MTARGETS) {
-            cli_dbgmsg("Not supported target type in signature for %s\n", virname);
+        if (target >= CLI_MTARGETS || target < 0) {
+            cli_dbgmsg("Not supported target type (%d) in signature for %s\n", (int)target, virname);
             continue;
         }
 
-        root = engine->root[target];
+        root = engine->root[(size_t)target];
 
         offset = tokens[2];
         sig    = tokens[3];
 
-        if (CL_SUCCESS != (ret = cli_add_content_match_pattern(root, virname, sig, 0, 0, 0, offset, target, NULL, options))) {
+        if (CL_SUCCESS != (ret = cli_add_content_match_pattern(root, virname, sig, 0, 0, 0, offset, NULL, options))) {
             ret = CL_EMALFDB;
             break;
         }
@@ -1703,7 +1731,7 @@ struct lsig_attrib {
 /* TODO: rework this */
 static int lsigattribs(char *attribs, struct cli_lsig_tdb *tdb)
 {
-// clang-format off
+    // clang-format off
 #define ATTRIB_TOKENS   10
 #define EXPR_TOKEN_MAX  16
     struct lsig_attrib attrtab[] = {
@@ -1985,8 +2013,8 @@ static inline int init_tdb(struct cli_lsig_tdb *tdb, struct cl_engine *engine, c
 
     if (tdb->engine) {
         if (tdb->engine[0] > cl_retflevel()) {
-            FREE_TDB_P(tdb);
             cli_dbgmsg("init_tdb: Signature for %s not loaded (required f-level: %u)\n", virname, tdb->engine[0]);
+            FREE_TDB_P(tdb);
             return CL_BREAK;
         } else if (tdb->engine[1] < cl_retflevel()) {
             FREE_TDB_P(tdb);
@@ -2004,13 +2032,13 @@ static inline int init_tdb(struct cli_lsig_tdb *tdb, struct cl_engine *engine, c
         return CL_BREAK;
     }
 
-    if ((tdb->icongrp1 || tdb->icongrp2) && tdb->target[0] != 1) {
+    if ((tdb->icongrp1 || tdb->icongrp2) && tdb->target[0] != TARGET_PE) {
         FREE_TDB_P(tdb);
         cli_errmsg("init_tdb: IconGroup is only supported in PE (target 1) signatures\n");
         return CL_EMALFDB;
     }
 
-    if ((tdb->ep || tdb->nos) && tdb->target[0] != 1 && tdb->target[0] != 6 && tdb->target[0] != 9) {
+    if ((tdb->ep || tdb->nos) && tdb->target[0] != TARGET_PE && tdb->target[0] != TARGET_ELF && tdb->target[0] != TARGET_MACHO) {
         FREE_TDB_P(tdb);
         cli_errmsg("init_tdb: EntryPoint/NumberOfSections is only supported in PE/ELF/Mach-O signatures\n");
         return CL_EMALFDB;
@@ -2033,7 +2061,6 @@ static cl_error_t load_oneldb(char *buffer, int chkpua, struct cl_engine *engine
     struct cli_ac_lsig *lsig = NULL;
     char *tokens[LDB_TOKENS + 1];
     int i, subsigs, tokens_count;
-    unsigned short target = 0;
     struct cli_matcher *root;
     struct cli_lsig_tdb tdb;
     uint32_t lsigid[2];
@@ -2094,18 +2121,6 @@ static cl_error_t load_oneldb(char *buffer, int chkpua, struct cl_engine *engine
         goto done;
     }
 
-#if !HAVE_PCRE
-    /* Regex Usage and Support Check */
-    for (i = 0; i < subsigs; ++i) {
-        char *slash = strchr(tokens[i + 3], '/');
-        if (slash && strchr(slash + 1, '/')) {
-            cli_warnmsg("cli_loadldb: logical signature for %s uses PCREs but support is disabled, skipping\n", virname);
-            status = CL_BREAK;
-            goto done;
-        }
-    }
-#endif
-
     /* enforce MAX_LDB_SUBSIGS subsig cap */
     if (subsigs > MAX_LDB_SUBSIGS) {
         cli_errmsg("cli_loadldb: Broken logical expression or too many subsignatures\n");
@@ -2116,7 +2131,11 @@ static cl_error_t load_oneldb(char *buffer, int chkpua, struct cl_engine *engine
     /* Initialize Target Description Block (TDB) */
     memset(&tdb, 0, sizeof(tdb));
     if (CL_SUCCESS != (ret = init_tdb(&tdb, engine, tokens[1], virname))) {
-        cli_errmsg("cli_loadldb: Failed to initialize target description block\n");
+        if (CL_BREAK == ret) {
+            status = CL_SUCCESS;
+        } else {
+            cli_errmsg("cli_loadldb: Failed to initialize target description block\n");
+        }
         status = ret;
         goto done;
     }
@@ -2168,7 +2187,7 @@ static cl_error_t load_oneldb(char *buffer, int chkpua, struct cl_engine *engine
         lsigid[1] = i;
 
         // handle each LDB subsig
-        ret = readdb_parse_ldb_subsignature(root, virname, tokens[3 + i], "*", target, lsigid, options, i, subsigs, &tdb);
+        ret = readdb_parse_ldb_subsignature(root, virname, tokens[3 + i], "*", lsigid, options, i, subsigs, &tdb);
         if (CL_SUCCESS != ret) {
             cli_errmsg("cli_loadldb: failed to parse subsignature %d in %s\n", i, virname);
             status = ret;
@@ -2223,7 +2242,7 @@ static int cli_loadldb(FILE *fs, struct cl_engine *engine, unsigned int *signo, 
         return ret;
 
     if (engine->ignored) {
-        if (!(buffer_cpy = cli_malloc(sizeof(buffer)))) {
+        if (!(buffer_cpy = malloc(sizeof(buffer)))) {
             cli_errmsg("cli_loadldb: Can't allocate memory for buffer_cpy\n");
             return CL_EMEM;
         }
@@ -2299,7 +2318,7 @@ static int cli_loadcbc(FILE *fs, struct cl_engine *engine, unsigned int *signo, 
         return CL_SUCCESS;
     }
 
-    bcs->all_bcs = cli_realloc2(bcs->all_bcs, sizeof(*bcs->all_bcs) * (bcs->count + 1));
+    bcs->all_bcs = cli_safer_realloc_or_free(bcs->all_bcs, sizeof(*bcs->all_bcs) * (bcs->count + 1));
     if (!bcs->all_bcs) {
         cli_errmsg("cli_loadcbc: Can't allocate memory for bytecode entry\n");
         return CL_EMEM;
@@ -2370,8 +2389,8 @@ static int cli_loadcbc(FILE *fs, struct cl_engine *engine, unsigned int *signo, 
         if (bc->kind >= _BC_START_HOOKS && bc->kind < _BC_LAST_HOOK) {
             unsigned hook       = bc->kind - _BC_START_HOOKS;
             unsigned cnt        = ++engine->hooks_cnt[hook];
-            engine->hooks[hook] = cli_realloc2(engine->hooks[hook],
-                                               sizeof(*engine->hooks[0]) * cnt);
+            engine->hooks[hook] = cli_safer_realloc_or_free(engine->hooks[hook],
+                                                            sizeof(*engine->hooks[0]) * cnt);
             if (!engine->hooks[hook]) {
                 cli_errmsg("Out of memory allocating memory for hook %u", hook);
                 return CL_EMEM;
@@ -2478,7 +2497,7 @@ static int cli_loadftm(FILE *fs, struct cl_engine *engine, unsigned int options,
 
         magictype = atoi(tokens[0]);
         if (magictype == 1) { /* A-C */
-            if (CL_SUCCESS != (ret = cli_add_content_match_pattern(engine->root[0], tokens[3], tokens[2], 0, rtype, type, tokens[1], 0, NULL, options)))
+            if (CL_SUCCESS != (ret = cli_add_content_match_pattern(engine->root[0], tokens[3], tokens[2], 0, rtype, type, tokens[1], NULL, options)))
                 break;
 
         } else if ((magictype == 0) || (magictype == 4)) { /* memcmp() */
@@ -2712,7 +2731,7 @@ static int cli_loadign(FILE *fs, struct cl_engine *engine, unsigned int options,
             int pad = 3 - len;
             /* patch-up for Boyer-Moore minimum length of 3: pad with spaces */
             if (signame != buffer) {
-                strncpy(buffer, signame, len);
+                memcpy(buffer, signame, len);
                 signame = buffer;
             }
             buffer[3] = '\0';
@@ -2806,7 +2825,7 @@ static int cli_loadhash(FILE *fs, struct cl_engine *engine, unsigned int *signo,
     }
 
     if (engine->ignored)
-        if (!(buffer_cpy = cli_malloc(FILEBUFF))) {
+        if (!(buffer_cpy = malloc(FILEBUFF))) {
             cli_errmsg("cli_loadhash: Can't allocate memory for buffer_cpy\n");
             return CL_EMEM;
         }
@@ -2934,7 +2953,7 @@ static int cli_loadmd(FILE *fs, struct cl_engine *engine, unsigned int *signo, i
     UNUSEDPARAM(dbname);
 
     if (engine->ignored)
-        if (!(buffer_cpy = cli_malloc(FILEBUFF))) {
+        if (!(buffer_cpy = malloc(FILEBUFF))) {
             cli_errmsg("cli_loadmd: Can't allocate memory for buffer_cpy\n");
             return CL_EMEM;
         }
@@ -3088,7 +3107,7 @@ static int cli_loadcdb(FILE *fs, struct cl_engine *engine, unsigned int *signo, 
     struct cli_cdb *new;
 
     if (engine->ignored)
-        if (!(buffer_cpy = cli_malloc(FILEBUFF))) {
+        if (!(buffer_cpy = malloc(FILEBUFF))) {
             cli_errmsg("cli_loadcdb: Can't allocate memory for buffer_cpy\n");
             return CL_EMEM;
         }
@@ -3295,9 +3314,7 @@ static int cli_loadcrt(FILE *fs, struct cl_engine *engine, struct cli_dbio *dbio
     char *tokens[CRT_TOKENS + 1];
     size_t line = 0, tokens_count;
     cli_crt ca;
-    int ret             = CL_SUCCESS;
-    char *pubkey        = NULL;
-    const uint8_t exp[] = "\x01\x00\x01";
+    int ret = CL_SUCCESS;
 
     if (!(engine->dconf->pe & PE_CONF_CERTS)) {
         cli_dbgmsg("cli_loadcrt: Ignoring .crb sigs due to DCONF configuration\n");
@@ -3309,7 +3326,10 @@ static int cli_loadcrt(FILE *fs, struct cl_engine *engine, struct cli_dbio *dbio
         return ret;
     }
 
-    cli_crt_init(&ca);
+    if (cli_crt_init(&ca) < 0) {
+        cli_dbgmsg("cli_loadcrt: No mem for CA init.\n");
+        return CL_EMEM;
+    }
     memset(ca.issuer, 0xca, sizeof(ca.issuer));
 
     while (cli_dbgets(buffer, FILEBUFF, fs, dbio)) {
@@ -3387,16 +3407,16 @@ static int cli_loadcrt(FILE *fs, struct cl_engine *engine, struct cli_dbio *dbio
             goto done;
         }
 
-        pubkey = cli_hex2str(tokens[4]);
-        if (!pubkey) {
+        if (BN_hex2bn(&ca.n, tokens[4]) == 0) {
             cli_errmsg("cli_loadcrt: line %u: Cannot convert public key to binary string\n", (unsigned int)line);
             ret = CL_EMALFDB;
             goto done;
         }
-
-        fp_read_unsigned_bin(&(ca.n), (const unsigned char *)pubkey, strlen(tokens[4]) / 2);
-
-        fp_read_unsigned_bin(&(ca.e), exp, sizeof(exp) - 1);
+        /* Set the RSA exponent of 65537 */
+        if (!BN_set_word(ca.e, 65537)) {
+            cli_errmsg("cli_loadcrt: Cannot set the exponent.\n");
+            goto done;
+        }
 
         switch (tokens[6][0]) {
             case '1':
@@ -3443,18 +3463,14 @@ static int cli_loadcrt(FILE *fs, struct cl_engine *engine, struct cli_dbio *dbio
             ca.name = NULL;
 
         if (strlen(tokens[9]))
-            ca.not_before = atoi(tokens[8]);
-        ca.not_after = (-1U) >> 1;
+            ca.not_before = atoi(tokens[9]);
+        ca.not_after = (-1ULL) >> 1;
 
         ca.hashtype = CLI_HASHTYPE_ANY;
         crtmgr_add(&(engine->cmgr), &ca);
-
-        FREE(pubkey);
     }
 
 done:
-    FREE(pubkey);
-
     cli_dbgmsg("Number of certs: %d\n", engine->cmgr.items);
     cli_crt_clear(&ca);
     return ret;
@@ -3553,7 +3569,7 @@ static char *parse_yara_hex_string(YR_STRING *string, int *ret)
     }
 
     reslen++;
-    res = cli_calloc(reslen, 1);
+    res = calloc(reslen, 1);
     if (!(res)) {
         if (ret) *ret = CL_EMEM;
         return NULL;
@@ -3692,7 +3708,7 @@ static cl_error_t ytable_add_attrib(struct cli_ytable *ytable, const char *hexsi
         if (ytable->table[lookup]->offset)
             free(ytable->table[lookup]->offset);
 
-        ytable->table[lookup]->offset = cli_strdup(value);
+        ytable->table[lookup]->offset = cli_safer_strdup(value);
 
         if (!ytable->table[lookup]->offset) {
             cli_yaramsg("ytable_add_attrib: ran out of memory for offset\n");
@@ -3713,13 +3729,13 @@ static int ytable_add_string(struct cli_ytable *ytable, const char *hexsig)
     if (!ytable || !hexsig)
         return CL_ENULLARG;
 
-    new = cli_calloc(1, sizeof(struct cli_ytable_entry));
+    new = calloc(1, sizeof(struct cli_ytable_entry));
     if (!new) {
         cli_yaramsg("ytable_add_string: out of memory for new ytable entry\n");
         return CL_EMEM;
     }
 
-    new->hexstr = cli_strdup(hexsig);
+    new->hexstr = cli_safer_strdup(hexsig);
     if (!new->hexstr) {
         cli_yaramsg("ytable_add_string: out of memory for hexsig copy\n");
         free(new);
@@ -3727,7 +3743,7 @@ static int ytable_add_string(struct cli_ytable *ytable, const char *hexsig)
     }
 
     ytable->tbl_cnt++;
-    newtable = cli_realloc(ytable->table, ytable->tbl_cnt * sizeof(struct cli_ytable_entry *));
+    newtable = cli_safer_realloc(ytable->table, ytable->tbl_cnt * sizeof(struct cli_ytable_entry *));
     if (!newtable) {
         cli_yaramsg("ytable_add_string: failed to reallocate new ytable table\n");
         free(new->hexstr);
@@ -3784,7 +3800,7 @@ static int yara_hexstr_verify(YR_STRING *string, const char *hexstr, uint32_t *l
     }
 
     /* Long Check: Attempt to load hexstr */
-    if (CL_SUCCESS != (ret = cli_sigopts_handler(engine->test_root, "test-hex", hexstr, 0, 0, 0, "*", 0, lsigid, options))) {
+    if (CL_SUCCESS != (ret = cli_sigopts_handler(engine->test_root, "test-hex", hexstr, 0, 0, 0, "*", lsigid, options))) {
         if (ret == CL_EMALFDB) {
             cli_warnmsg("load_oneyara[verify]: recovered from database loading error\n");
             /* TODO: if necessary, reset testing matcher if error occurs */
@@ -3813,7 +3829,6 @@ static int load_oneyara(YR_RULE *rule, int chkpua, struct cl_engine *engine, uns
     uint32_t lsigid[2];
     struct cli_matcher *root;
     struct cli_ac_lsig **newtable, *lsig, *tsig = NULL;
-    unsigned short target = 0;
     char *logic = NULL, *target_str = NULL;
     char *newident = NULL;
     /* size_t lsize; */       // only used in commented out code
@@ -3834,7 +3849,7 @@ static int load_oneyara(YR_RULE *rule, int chkpua, struct cl_engine *engine, uns
         return CL_SUCCESS;
     }
 
-    newident = cli_malloc(strlen(rule->identifier) + 5 + 1);
+    newident = malloc(strlen(rule->identifier) + 5 + 1);
     if (!newident) {
         cli_errmsg("cli_loadyara(): newident == NULL\n");
         return CL_EMEM;
@@ -4000,10 +4015,9 @@ static int load_oneyara(YR_RULE *rule, int chkpua, struct cl_engine *engine, uns
             free(substr);
         } else if (STRING_IS_REGEXP(string)) {
             /* TODO - rewrite to NOT use PCRE_BYPASS */
-#if HAVE_PCRE
             size_t length = strlen(PCRE_BYPASS) + string->length + 3;
 
-            substr = cli_calloc(length, sizeof(char));
+            substr = calloc(length, sizeof(char));
             if (!substr) {
                 cli_errmsg("load_oneyara: cannot allocate memory for converted regex string\n");
                 str_error++;
@@ -4017,12 +4031,6 @@ static int load_oneyara(YR_RULE *rule, int chkpua, struct cl_engine *engine, uns
 
             ytable_add_string(&ytable, substr);
             free(substr);
-#else
-            cli_warnmsg("cli_loadyara: %s uses PCREs but support is disabled\n", newident);
-            str_error++;
-            ret = CL_SUCCESS;
-            break;
-#endif
         } else {
             /* TODO - extract the string length to handle NULL hex-escaped characters
              * For now, we'll just use the strlen we get which crudely finds the length
@@ -4036,7 +4044,7 @@ static int load_oneyara(YR_RULE *rule, int chkpua, struct cl_engine *engine, uns
                 continue;
             }
 
-            substr = cli_calloc(totsize, sizeof(char));
+            substr = calloc(totsize, sizeof(char));
             if (!substr) {
                 cli_errmsg("load_oneyara: cannot allocate memory for converted generic string\n");
                 str_error++;
@@ -4168,7 +4176,7 @@ static int load_oneyara(YR_RULE *rule, int chkpua, struct cl_engine *engine, uns
 #if 0
     if (rule->cl_flags & RULE_ALL ||  rule->cl_flags & RULE_ANY) {
         lsize = 3*ytable.tbl_cnt;
-        logic = cli_calloc(lsize, sizeof(char));
+        logic = calloc(lsize, sizeof(char));
         if (!logic) {
             cli_errmsg("load_oneyara: cannot allocate memory for logic statement\n");
             ytable_delete(&ytable);
@@ -4194,10 +4202,10 @@ static int load_oneyara(YR_RULE *rule, int chkpua, struct cl_engine *engine, uns
 
     /* TDB */
     if (rule->cl_flags & RULE_EP && ytable.tbl_cnt == 1)
-        target_str = cli_strdup(YARATARGET1);
+        target_str = cli_safer_strdup(YARATARGET1);
     else
 #endif
-    target_str = cli_strdup(YARATARGET0);
+    target_str = cli_safer_strdup(YARATARGET0);
 
     memset(&tdb, 0, sizeof(tdb));
     if (CL_SUCCESS != (ret = init_tdb(&tdb, engine, target_str, newident))) {
@@ -4294,7 +4302,7 @@ static int load_oneyara(YR_RULE *rule, int chkpua, struct cl_engine *engine, uns
                     (ytable.table[i]->sigopts & ACPATT_OPTION_ASCII) ? "a" : "");
 
         ret = readdb_parse_yara_string(root, newident, ytable.table[i]->hexstr, ytable.table[i]->sigopts,
-                                       ytable.table[i]->offset, target, lsigid, options);
+                                       ytable.table[i]->offset, lsigid, options);
         if (CL_SUCCESS != ret) {
             root->ac_lsigs--;
             FREE_TDB(tdb);
@@ -4327,7 +4335,7 @@ struct _yara_global {
 cl_error_t cli_yara_init(struct cl_engine *engine)
 {
     /* Initialize YARA */
-    engine->yara_global = cli_calloc(1, sizeof(struct _yara_global));
+    engine->yara_global = calloc(1, sizeof(struct _yara_global));
     if (NULL == engine->yara_global) {
         cli_errmsg("cli_yara_init: failed to create YARA global\n");
         return CL_EMEM;
@@ -4565,7 +4573,7 @@ static int cli_loadpwdb(FILE *fs, struct cl_engine *engine, unsigned int options
 
         /* append target type 0 to tdb string if needed */
         if ((tokens[1][0] == '\0') || (strstr(tokens[1], "Target:") != NULL)) {
-            attribs = cli_strdup(tokens[1]);
+            attribs = cli_safer_strdup(tokens[1]);
             if (!attribs) {
                 cli_errmsg("cli_loadpwdb: Can't allocate memory for attributes\n");
                 ret = CL_EMEM;
@@ -4573,7 +4581,7 @@ static int cli_loadpwdb(FILE *fs, struct cl_engine *engine, unsigned int options
             }
         } else {
             size_t attlen = strlen(tokens[1]) + 10;
-            attribs       = cli_calloc(attlen, sizeof(char));
+            attribs       = calloc(attlen, sizeof(char));
             if (!attribs) {
                 cli_errmsg("cli_loadpwdb: Can't allocate memory for attributes\n");
                 ret = CL_EMEM;
@@ -4848,9 +4856,11 @@ cl_error_t cli_load(const char *filename, struct cl_engine *engine, unsigned int
     if (fs)
         fclose(fs);
 
-    if (engine->cb_sigload_progress) {
-        /* Let the progress callback function know how we're doing */
-        (void)engine->cb_sigload_progress(engine->num_total_signatures, *signo, engine->cb_sigload_progress_ctx);
+    if (CL_SUCCESS == ret) {
+        if (engine->cb_sigload_progress) {
+            /* Let the progress callback function know how we're doing */
+            (void)engine->cb_sigload_progress(engine->num_total_signatures, *signo, engine->cb_sigload_progress_ctx);
+        }
     }
 
     return ret;
@@ -5052,7 +5062,7 @@ static cl_error_t cli_loaddbdir(const char *dirname, struct cl_engine *engine, u
             continue;
         }
 
-        dbfile = (char *)cli_malloc(strlen(dent->d_name) + dirname_len + 2);
+        dbfile = (char *)malloc(strlen(dent->d_name) + dirname_len + 2);
         if (!dbfile) {
             cli_errmsg("cli_loaddbdir: dbfile == NULL\n");
             ret = CL_EMEM;
@@ -5286,7 +5296,7 @@ cl_error_t cl_load(const char *path, struct cl_engine *engine, unsigned int *sig
         cli_dbgmsg("Bytecode engine disabled\n");
     }
 
-    if (!engine->cache && cli_cache_init(engine))
+    if (!engine->cache && clean_cache_init(engine))
         return CL_EMEM;
 
     engine->dboptions |= dboptions;
@@ -5368,7 +5378,7 @@ cl_error_t cl_statinidir(const char *dirname, struct cl_stat *dbstat)
         dbstat->entries   = 0;
         dbstat->stattab   = NULL;
         dbstat->statdname = NULL;
-        dbstat->dir       = cli_strdup(dirname);
+        dbstat->dir       = cli_safer_strdup(dirname);
     } else {
         cli_errmsg("cl_statdbdir(): Null argument passed.\n");
         return CL_ENULLARG;
@@ -5386,7 +5396,7 @@ cl_error_t cl_statinidir(const char *dirname, struct cl_stat *dbstat)
         if (dent->d_ino) {
             if (strcmp(dent->d_name, ".") && strcmp(dent->d_name, "..") && CLI_DBEXT(dent->d_name)) {
                 dbstat->entries++;
-                dbstat->stattab = (STATBUF *)cli_realloc2(dbstat->stattab, dbstat->entries * sizeof(STATBUF));
+                dbstat->stattab = (STATBUF *)cli_safer_realloc_or_free(dbstat->stattab, dbstat->entries * sizeof(STATBUF));
                 if (!dbstat->stattab) {
                     cl_statfree(dbstat);
                     closedir(dd);
@@ -5394,7 +5404,7 @@ cl_error_t cl_statinidir(const char *dirname, struct cl_stat *dbstat)
                 }
 
 #ifdef _WIN32
-                dbstat->statdname = (char **)cli_realloc2(dbstat->statdname, dbstat->entries * sizeof(char *));
+                dbstat->statdname = (char **)cli_safer_realloc_or_free(dbstat->statdname, dbstat->entries * sizeof(char *));
                 if (!dbstat->statdname) {
                     cli_errmsg("cl_statinidir: Can't allocate memory for dbstat->statdname\n");
                     cl_statfree(dbstat);
@@ -5403,7 +5413,7 @@ cl_error_t cl_statinidir(const char *dirname, struct cl_stat *dbstat)
                 }
 #endif
 
-                fname = cli_malloc(strlen(dirname) + strlen(dent->d_name) + 32);
+                fname = malloc(strlen(dirname) + strlen(dent->d_name) + 32);
                 if (!fname) {
                     cli_errmsg("cl_statinidir: Cant' allocate memory for fname\n");
                     cl_statfree(dbstat);
@@ -5412,7 +5422,7 @@ cl_error_t cl_statinidir(const char *dirname, struct cl_stat *dbstat)
                 }
                 sprintf(fname, "%s" PATHSEP "%s", dirname, dent->d_name);
 #ifdef _WIN32
-                dbstat->statdname[dbstat->entries - 1] = (char *)cli_malloc(strlen(dent->d_name) + 1);
+                dbstat->statdname[dbstat->entries - 1] = (char *)malloc(strlen(dent->d_name) + 1);
                 if (!dbstat->statdname[dbstat->entries - 1]) {
                     cli_errmsg("cli_statinidir: Can't allocate memory for dbstat->statdname\n");
                     cl_statfree(dbstat);
@@ -5455,7 +5465,7 @@ int cl_statchkdir(const struct cl_stat *dbstat)
     while ((dent = readdir(dd))) {
         if (dent->d_ino) {
             if (strcmp(dent->d_name, ".") && strcmp(dent->d_name, "..") && CLI_DBEXT(dent->d_name)) {
-                fname = cli_malloc(strlen(dbstat->dir) + strlen(dent->d_name) + 32);
+                fname = malloc(strlen(dbstat->dir) + strlen(dent->d_name) + 32);
                 if (!fname) {
                     cli_errmsg("cl_statchkdir: can't allocate memory for fname\n");
                     closedir(dd);
@@ -5605,9 +5615,9 @@ cl_error_t cl_engine_free(struct cl_engine *engine)
                     tasks_to_do += root->ac_lsigs / 1000; // every 1000 logical sigs
                     tasks_to_do += 1;                     // ac lsig table
                 }
-#if HAVE_PCRE
+
                 tasks_to_do += 1; // pcre table
-#endif
+
                 tasks_to_do += 1; // root mempool
             }
         }
@@ -5636,9 +5646,9 @@ cl_error_t cl_engine_free(struct cl_engine *engine)
             tasks_to_do += root->ac_lsigs / 1000; // every 1000 logical sigs
             tasks_to_do += 1;                     // ac lsig table
         }
-#if HAVE_PCRE
+
         tasks_to_do += 1; // pcre table
-#endif
+
         tasks_to_do += 1; // fuzzy hashmap
 
         tasks_to_do += 1; // engine root mempool
@@ -5689,10 +5699,10 @@ cl_error_t cl_engine_free(struct cl_engine *engine)
                     MPOOL_FREE(engine->mempool, root->ac_lsigtable);
                     TASK_COMPLETE();
                 }
-#if HAVE_PCRE
+
                 cli_pcre_freetable(root);
                 TASK_COMPLETE();
-#endif /* HAVE_PCRE */
+
                 fuzzy_hash_free_hashmap(root->fuzzy_hashmap);
                 TASK_COMPLETE();
 
@@ -5824,7 +5834,7 @@ cl_error_t cl_engine_free(struct cl_engine *engine)
     TASK_COMPLETE();
 
     if (engine->cache) {
-        cli_cache_destroy(engine);
+        clean_cache_destroy(engine);
     }
     TASK_COMPLETE();
 
@@ -5860,10 +5870,9 @@ cl_error_t cl_engine_free(struct cl_engine *engine)
             MPOOL_FREE(engine->mempool, root->ac_lsigtable);
             TASK_COMPLETE();
         }
-#if HAVE_PCRE
         cli_pcre_freetable(root);
         TASK_COMPLETE();
-#endif /* HAVE_PCRE */
+
         MPOOL_FREE(engine->mempool, root);
         TASK_COMPLETE();
     }
@@ -5909,9 +5918,7 @@ cl_error_t cl_engine_compile(struct cl_engine *engine)
     for (i = 0; i < CLI_MTARGETS; i++) {
         if ((root = engine->root[i])) {
             tasks_to_do += 1; // build ac trie
-#if HAVE_PCRE
             tasks_to_do += 1; // compile pcre regex
-#endif
         }
     }
     tasks_to_do += 1; // flush hdb
@@ -5971,15 +5978,12 @@ cl_error_t cl_engine_compile(struct cl_engine *engine)
             if ((ret = cli_ac_buildtrie(root)))
                 return ret;
             TASK_COMPLETE();
-#if HAVE_PCRE
+
             if ((ret = cli_pcre_build(root, engine->pcre_match_limit, engine->pcre_recmatch_limit, engine->dconf)))
                 return ret;
             TASK_COMPLETE();
 
             cli_dbgmsg("Matcher[%u]: %s: AC sigs: %u (reloff: %u, absoff: %u) BM sigs: %u (reloff: %u, absoff: %u) PCREs: %u (reloff: %u, absoff: %u) maxpatlen %u %s\n", i, cli_mtargets[i].name, root->ac_patterns, root->ac_reloff_num, root->ac_absoff_num, root->bm_patterns, root->bm_reloff_num, root->bm_absoff_num, root->pcre_metas, root->pcre_reloff_num, root->pcre_absoff_num, root->maxpatlen, root->ac_only ? "(ac_only mode)" : "");
-#else
-            cli_dbgmsg("Matcher[%u]: %s: AC sigs: %u (reloff: %u, absoff: %u) BM sigs: %u (reloff: %u, absoff: %u) maxpatlen %u PCREs: 0 (disabled) %s\n", i, cli_mtargets[i].name, root->ac_patterns, root->ac_reloff_num, root->ac_absoff_num, root->bm_patterns, root->bm_reloff_num, root->bm_absoff_num, root->maxpatlen, root->ac_only ? "(ac_only mode)" : "");
-#endif
         }
     }
 
@@ -6032,9 +6036,9 @@ cl_error_t cl_engine_compile(struct cl_engine *engine)
             }
             MPOOL_FREE(engine->mempool, root->ac_lsigtable);
         }
-#if HAVE_PCRE
+
         cli_pcre_freetable(root);
-#endif /* HAVE_PCRE */
+
         MPOOL_FREE(engine->mempool, root);
         engine->test_root = NULL;
         TASK_COMPLETE();
@@ -6044,7 +6048,7 @@ cl_error_t cl_engine_compile(struct cl_engine *engine)
     MPOOL_FLUSH(engine->mempool);
 
     /* Compile bytecode */
-    if ((ret = cli_bytecode_prepare2(engine, &engine->bcs, engine->dconf->bytecode))) {
+    if (CL_SUCCESS != (ret = cli_bytecode_prepare2(engine, &engine->bcs, engine->dconf->bytecode))) {
         cli_errmsg("Unable to compile/load bytecode: %s\n", cl_strerror(ret));
         return ret;
     }

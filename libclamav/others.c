@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *  Copyright (C) 2007-2013 Sourcefire, Inc.
  *
  *  Authors: Tomasz Kojm, Trog
@@ -58,9 +58,7 @@
 #include <pthread.h>
 #endif
 
-#ifdef HAVE_LIBXML2
 #include <libxml/parser.h>
-#endif
 
 #ifndef _WIN32
 #include <dlfcn.h>
@@ -80,7 +78,7 @@
 #include "stats.h"
 #include "json_api.h"
 
-#include "libclamav_rust/clamav_rust.h"
+#include "clamav_rust.h"
 
 cl_unrar_error_t (*cli_unrar_open)(const char *filename, void **hArchive, char **comment, uint32_t *comment_size, uint8_t debug_flag);
 cl_unrar_error_t (*cli_unrar_peek_file_header)(void *hArchive, unrar_metadata_t *file_metadata);
@@ -94,106 +92,27 @@ static int is_rar_inited = 0;
 #define PASTE2(a, b) a #b
 #define PASTE(a, b) PASTE2(a, b)
 
+#ifdef _WIN32
+
 static void *load_module(const char *name, const char *featurename)
 {
-#ifdef _WIN32
-    static const char *suffixes[] = {LT_MODULE_EXT};
-#else
-    static const char *suffixes[] = {
-        LT_MODULE_EXT "." LIBCLAMAV_FULLVER,
-        PASTE(LT_MODULE_EXT ".", LIBCLAMAV_MAJORVER),
-        LT_MODULE_EXT,
-        "." LT_LIBEXT};
-#endif
-
-    const char *searchpath;
-    char modulename[128];
-    size_t i;
-#ifdef _WIN32
     HMODULE rhandle = NULL;
-#else
-    void *rhandle;
-#endif
+    char modulename[512];
+    size_t i;
 
-#ifdef _WIN32
     /*
-     * First try a standard LoadLibraryA() without specifying a full path.
+     * For Windows, just try a standard LoadLibraryA() with each of the different possible suffixes.
      * For more information on the DLL search order, see:
-     *  https://docs.microsoft.com/en-us/windows/desktop/Dlls/dynamic-link-library-search-order
+     *  https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order
      */
     cli_dbgmsg("searching for %s\n", featurename);
-#else
-    /*
-     * First search using the provided SEARCH_LIBDIR (e.g. "<prefix>/lib")
-     * Known issue: If an older clamav version is already installed, the clamav
-     * unit tests using this function will load the older library version from
-     * the install path first.
-     */
-    searchpath = SEARCH_LIBDIR;
-    cli_dbgmsg("searching for %s, user-searchpath: %s\n", featurename, searchpath);
-#endif
 
-    for (i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
-#ifdef _WIN32
-        snprintf(modulename, sizeof(modulename), "%s%s", name, suffixes[i]);
-        rhandle = LoadLibraryA(modulename);
-#else  // !_WIN32
-        snprintf(modulename, sizeof(modulename), "%s" PATHSEP "%s%s", searchpath, name, suffixes[i]);
-        rhandle = dlopen(modulename, RTLD_NOW);
-#endif // !_WIN32
-        if (rhandle) {
-            break;
-        }
+    snprintf(modulename, sizeof(modulename), "%s%s", name, LT_MODULE_EXT);
 
-        cli_dbgmsg("searching for %s: %s not found\n", featurename, modulename);
-    }
-
+    rhandle = LoadLibraryA(modulename);
     if (NULL == rhandle) {
-        char *ld_library_path = NULL;
-        /*
-         * library not found.
-         * Try again using LD_LIBRARY_PATH environment variable for the path.
-         */
-        ld_library_path = getenv("LD_LIBRARY_PATH");
-        if (NULL != ld_library_path) {
-#define MAX_LIBRARY_PATHS 10
-            size_t token_index;
-            size_t tokens_count;
-            const char *tokens[MAX_LIBRARY_PATHS];
+        char *err = NULL;
 
-            char *tokenized_library_path = NULL;
-
-            tokenized_library_path = strdup(ld_library_path);
-            tokens_count           = cli_strtokenize(tokenized_library_path, ':', MAX_LIBRARY_PATHS, tokens);
-
-            for (token_index = 0; token_index < tokens_count; token_index++) {
-                cli_dbgmsg("searching for %s, LD_LIBRARY_PATH: %s\n", featurename, tokens[token_index]);
-
-                for (i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
-                    snprintf(modulename, sizeof(modulename), "%s" PATHSEP "%s%s", tokens[token_index], name, suffixes[i]);
-#ifdef _WIN32
-                    rhandle = LoadLibraryA(modulename);
-#else  // !_WIN32
-                    rhandle = dlopen(modulename, RTLD_NOW);
-#endif // !_WIN32
-                    if (rhandle) {
-                        break;
-                    }
-
-                    cli_dbgmsg("searching for %s: %s not found\n", featurename, modulename);
-                }
-
-                if (rhandle) {
-                    break;
-                }
-            }
-            free(tokenized_library_path);
-        }
-    }
-
-    if (NULL == rhandle) {
-#ifdef _WIN32
-        char *err     = NULL;
         DWORD lasterr = GetLastError();
         if (0 < lasterr) {
             FormatMessageA(
@@ -205,35 +124,111 @@ static void *load_module(const char *name, const char *featurename)
                 0,
                 NULL);
         }
-#else  // !_WIN32
-        const char *err = dlerror();
-#endif // !_WIN32
 
-#ifdef WARN_DLOPEN_FAIL
         if (NULL == err) {
-            cli_warnmsg("Cannot dlopen %s: Unknown error - %s support unavailable\n", name, featurename);
+            cli_dbgmsg("Cannot LoadLibraryA %s: Unknown error - %s support unavailable\n", name, featurename);
         } else {
-            cli_warnmsg("Cannot dlopen %s: %s - %s support unavailable\n", name, err, featurename);
-        }
-#else
-        if (NULL == err) {
-            cli_dbgmsg("Cannot dlopen %s: Unknown error - %s support unavailable\n", name, featurename);
-        } else {
-            cli_dbgmsg("Cannot dlopen %s: %s - %s support unavailable\n", name, err, featurename);
-        }
-#endif
-
-#ifdef _WIN32
-        if (NULL != err) {
+            cli_dbgmsg("Cannot LoadLibraryA %s: %s - %s support unavailable\n", name, err, featurename);
             LocalFree(err);
         }
-#endif
-        return rhandle;
+
+        goto done;
     }
 
     cli_dbgmsg("%s support loaded from %s\n", featurename, modulename);
+
+done:
+
     return (void *)rhandle;
 }
+
+#else
+
+static void *load_module(const char *name, const char *featurename)
+{
+    static const char *suffixes[] = {
+        LT_MODULE_EXT "." LIBCLAMAV_FULLVER,
+        PASTE(LT_MODULE_EXT ".", LIBCLAMAV_MAJORVER),
+        LT_MODULE_EXT,
+        "." LT_LIBEXT};
+    void *rhandle                = NULL;
+    char *tokenized_library_path = NULL;
+    char *ld_library_path        = NULL;
+    const char *err;
+
+    char modulename[512];
+    size_t i;
+
+    /*
+     * First try using LD_LIBRARY_PATH environment variable for the path.
+     * We do this first because LD_LIBRARY_PATH is intended as an option to override the installed library path.
+     *
+     * We don't do this for Windows because Windows doesn't have an equivalent to LD_LIBRARY_PATH
+     * and because LoadLibraryA() will search the executable's folder, which works for the unit tests.
+     */
+    ld_library_path = getenv("LD_LIBRARY_PATH");
+    if (NULL != ld_library_path && strlen(ld_library_path) > 0) {
+#define MAX_LIBRARY_PATHS 10
+        size_t token_index;
+        size_t tokens_count;
+        const char *tokens[MAX_LIBRARY_PATHS];
+
+        /*
+         * LD_LIBRARY_PATH may be a colon-separated list of directories.
+         * Tokenize the list and try to load the library from each directory.
+         */
+        tokenized_library_path = strdup(ld_library_path);
+        tokens_count           = cli_strtokenize(tokenized_library_path, ':', MAX_LIBRARY_PATHS, tokens);
+
+        for (token_index = 0; token_index < tokens_count; token_index++) {
+            cli_dbgmsg("searching for %s, LD_LIBRARY_PATH: %s\n", featurename, tokens[token_index]);
+
+            for (i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
+                snprintf(modulename, sizeof(modulename), "%s" PATHSEP "%s%s", tokens[token_index], name, suffixes[i]);
+
+                rhandle = dlopen(modulename, RTLD_NOW);
+                if (NULL != rhandle) {
+                    cli_dbgmsg("%s support loaded from %s\n", featurename, modulename);
+                    goto done;
+                }
+
+                cli_dbgmsg("searching for %s: %s not found\n", featurename, modulename);
+            }
+        }
+    }
+
+    /*
+     * Search in "<prefix>/lib" checking with each of the different possible suffixes.
+     */
+    cli_dbgmsg("searching for %s, user-searchpath: %s\n", featurename, SEARCH_LIBDIR);
+
+    for (i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
+        snprintf(modulename, sizeof(modulename), "%s" PATHSEP "%s%s", SEARCH_LIBDIR, name, suffixes[i]);
+
+        rhandle = dlopen(modulename, RTLD_NOW);
+        if (NULL != rhandle) {
+            cli_dbgmsg("%s support loaded from %s\n", featurename, modulename);
+            goto done;
+        }
+
+        cli_dbgmsg("searching for %s: %s not found\n", featurename, modulename);
+    }
+
+    err = dlerror();
+    if (NULL == err) {
+        cli_dbgmsg("Cannot dlopen %s: Unknown error - %s support unavailable\n", name, featurename);
+    } else {
+        cli_dbgmsg("Cannot dlopen %s: %s - %s support unavailable\n", name, err, featurename);
+    }
+
+done:
+
+    free(tokenized_library_path);
+
+    return (void *)rhandle;
+}
+
+#endif
 
 #ifdef _WIN32
 
@@ -250,7 +245,7 @@ static void *get_module_function(HMODULE handle, const char *name)
                 NULL,
                 lasterr,
                 MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                (LPCSTR)&err,
+                (LPSTR)&err,
                 0,
                 NULL);
         }
@@ -269,7 +264,7 @@ static void *get_module_function(HMODULE handle, const char *name)
 static void *get_module_function(void *handle, const char *name)
 {
     void *procAddress = NULL;
-    procAddress = dlsym(handle, name);
+    procAddress       = dlsym(handle, name);
     if (NULL == procAddress) {
         const char *err = dlerror();
         if (NULL == err) {
@@ -339,7 +334,7 @@ unsigned int cl_retflevel(void)
     return CL_FLEVEL;
 }
 
-const char *cl_strerror(int clerror)
+const char *cl_strerror(cl_error_t clerror)
 {
     switch (clerror) {
         /* libclamav specific codes */
@@ -442,9 +437,9 @@ cl_error_t cl_init(unsigned int initoptions)
     rc = bytecode_init();
     if (rc)
         return rc;
-#ifdef HAVE_LIBXML2
+
     xmlInitParser();
-#endif
+
     return CL_SUCCESS;
 }
 
@@ -453,7 +448,7 @@ struct cl_engine *cl_engine_new(void)
     struct cl_engine *new;
     cli_intel_t *intel;
 
-    new = (struct cl_engine *)cli_calloc(1, sizeof(struct cl_engine));
+    new = (struct cl_engine *)calloc(1, sizeof(struct cl_engine));
     if (!new) {
         cli_errmsg("cl_engine_new: Can't allocate memory for cl_engine\n");
         return NULL;
@@ -473,6 +468,7 @@ struct cl_engine *cl_engine_new(void)
     new->maxhtmlnotags      = CLI_DEFAULT_MAXHTMLNOTAGS;
     new->maxscriptnormalize = CLI_DEFAULT_MAXSCRIPTNORMALIZE;
     new->maxziptypercg      = CLI_DEFAULT_MAXZIPTYPERCG;
+    new->cache_size         = CLI_DEFAULT_CACHE_SIZE;
 
     new->bytecode_security = CL_BYTECODE_TRUST_SIGNED;
     /* 5 seconds timeout */
@@ -538,7 +534,7 @@ struct cl_engine *cl_engine_new(void)
     }
 
     /* Set up default stats/intel gathering callbacks */
-    intel = cli_calloc(1, sizeof(cli_intel_t));
+    intel = calloc(1, sizeof(cli_intel_t));
     if ((intel)) {
 #ifdef CL_THREAD_SAFE
         if (pthread_mutex_init(&(intel->mutex), NULL)) {
@@ -580,9 +576,6 @@ struct cl_engine *cl_engine_new(void)
     new->maxrechwp3 = CLI_DEFAULT_MAXRECHWP3;
 
     /* PCRE matching limitations */
-#if HAVE_PCRE
-    cli_pcre_init();
-#endif
     new->pcre_match_limit    = CLI_DEFAULT_PCRE_MATCH_LIMIT;
     new->pcre_recmatch_limit = CLI_DEFAULT_PCRE_RECMATCH_LIMIT;
     new->pcre_max_filesize   = CLI_DEFAULT_PCRE_MAX_FILESIZE;
@@ -622,7 +615,20 @@ cl_error_t cl_engine_set_num(struct cl_engine *engine, enum cl_engine_field fiel
             engine->maxscansize = num;
             break;
         case CL_ENGINE_MAX_FILESIZE:
-            engine->maxfilesize = num;
+            /* We have a limit of around 2GB (INT_MAX - 2). Enforce it here.
+             *
+             * TODO: Large file support is large-ly untested. Remove this restriction and test with a large set of large files of various types.
+             * libclamav's integer type safety has come a long way since 2014, so it's possible we could lift this restriction, but at least one
+             * of the parsers is bound to behave badly with large files. */
+            if ((uint64_t)num > INT_MAX - 2) {
+                if ((uint64_t)num > (uint64_t)2 * 1024 * 1024 * 1024 && num != LLONG_MAX) {
+                    // If greater than 2GB, warn. If exactly at 2GB, don't hassle the user.
+                    cli_warnmsg("Max file-size was set to %lld bytes. Unfortunately, scanning files greater than 2147483647 bytes (2 GiB - 1) is not supported.\n", num);
+                }
+                engine->maxfilesize = INT_MAX - 2;
+            } else {
+                engine->maxfilesize = num;
+            }
             break;
         case CL_ENGINE_MAX_RECURSION:
             if (!num) {
@@ -727,7 +733,12 @@ cl_error_t cl_engine_set_num(struct cl_engine *engine, enum cl_engine_field fiel
             } else {
                 engine->engine_options &= ~(ENGINE_OPTIONS_DISABLE_CACHE);
                 if (!(engine->cache))
-                    cli_cache_init(engine);
+                    clean_cache_init(engine);
+            }
+            break;
+        case CL_ENGINE_CACHE_SIZE:
+            if (num) {
+                engine->cache_size = (uint32_t)num;
             }
             break;
         case CL_ENGINE_DISABLE_PE_STATS:
@@ -846,6 +857,8 @@ long long cl_engine_get_num(const struct cl_engine *engine, enum cl_engine_field
             return engine->bytecode_mode;
         case CL_ENGINE_DISABLE_CACHE:
             return engine->engine_options & ENGINE_OPTIONS_DISABLE_CACHE;
+        case CL_ENGINE_CACHE_SIZE:
+            return engine->cache_size;
         case CL_ENGINE_STATS_TIMEOUT:
             return ((cli_intel_t *)(engine->stats_data))->timeout;
         case CL_ENGINE_MAX_PARTITIONS:
@@ -976,6 +989,7 @@ struct cl_settings *cl_engine_settings_copy(const struct cl_engine *engine)
     settings->cb_meta                        = engine->cb_meta;
     settings->cb_file_props                  = engine->cb_file_props;
     settings->engine_options                 = engine->engine_options;
+    settings->cache_size                     = engine->cache_size;
 
     settings->cb_stats_add_sample      = engine->cb_stats_add_sample;
     settings->cb_stats_remove_sample   = engine->cb_stats_remove_sample;
@@ -1020,6 +1034,7 @@ cl_error_t cl_engine_settings_apply(struct cl_engine *engine, const struct cl_se
     engine->bytecode_timeout    = settings->bytecode_timeout;
     engine->bytecode_mode       = settings->bytecode_mode;
     engine->engine_options      = settings->engine_options;
+    engine->cache_size          = settings->cache_size;
 
     if (engine->tmpdir)
         MPOOL_FREE(engine->mempool, engine->tmpdir);
@@ -1089,70 +1104,78 @@ cl_error_t cl_engine_settings_free(struct cl_settings *settings)
     return CL_SUCCESS;
 }
 
-void cli_append_virus_if_heur_exceedsmax(cli_ctx *ctx, char *vname)
+void cli_append_potentially_unwanted_if_heur_exceedsmax(cli_ctx *ctx, char *vname)
 {
     if (!ctx->limit_exceeded) {
         ctx->limit_exceeded = true; // guard against adding an alert (or metadata) a million times for non-fatal exceeds-max conditions
                                     // TODO: consider changing this from a bool to a threshold so we could at least see more than 1 limits exceeded
 
         if (SCAN_HEURISTIC_EXCEEDS_MAX) {
-            cli_append_possibly_unwanted(ctx, vname);
+            cli_append_potentially_unwanted(ctx, vname);
             cli_dbgmsg("%s: scanning may be incomplete and additional analysis needed for this file.\n", vname);
         }
 
-#if HAVE_JSON
         /* Also record the event in the scan metadata, under "ParseErrors" */
         if (SCAN_COLLECT_METADATA && ctx->wrkproperty) {
             cli_json_parse_error(ctx->wrkproperty, vname);
         }
-#endif
     }
 }
 
-cl_error_t cli_checklimits(const char *who, cli_ctx *ctx, unsigned long need1, unsigned long need2, unsigned long need3)
+cl_error_t cli_checklimits(const char *who, cli_ctx *ctx, uint64_t need1, uint64_t need2, uint64_t need3)
 {
     cl_error_t ret = CL_SUCCESS;
-    unsigned long needed;
+    uint64_t needed;
 
-    /* if called without limits, go on, unpack, scan */
-    if (!ctx) return ret;
+    if (!ctx) {
+        /* if called without limits, go on, unpack, scan */
+        goto done;
+    }
 
     needed = (need1 > need2) ? need1 : need2;
     needed = (needed > need3) ? needed : need3;
 
-    /* Enforce timelimit */
-    if (CL_ETIMEOUT == (ret = cli_checktimelimit(ctx))) {
-        /* Abort the scan ... */
-        ret = CL_ETIMEOUT;
+    /* Enforce global time limit, if limit enabled */
+    ret = cli_checktimelimit(ctx);
+    if (CL_SUCCESS != ret) {
+        // Exceeding the time limit will abort the scan.
+        // The logic for this and the possible heuristic is done inside the cli_checktimelimit function.
+        goto done;
     }
 
-    /* Enforce global scan-size limit */
-    if (needed && ctx->engine->maxscansize) {
-        /* if the remaining scansize is too small... */
-        if (ctx->engine->maxscansize - ctx->scansize < needed) {
-            /* Skip this file */
-            cli_dbgmsg("%s: scansize exceeded (initial: %lu, consumed: %lu, needed: %lu)\n", who, (unsigned long int)ctx->engine->maxscansize, (unsigned long int)ctx->scansize, needed);
-            ret = CL_EMAXSIZE;
-            cli_append_virus_if_heur_exceedsmax(ctx, "Heuristics.Limits.Exceeded.MaxScanSize");
-        }
-    }
-
-    /* Enforce per-file file-size limit */
-    if (needed && ctx->engine->maxfilesize && ctx->engine->maxfilesize < needed) {
-        /* Skip this file */
-        cli_dbgmsg("%s: filesize exceeded (allowed: %lu, needed: %lu)\n", who, (unsigned long int)ctx->engine->maxfilesize, needed);
+    /* Enforce global scan-size limit, if limit enabled */
+    if (needed && (ctx->engine->maxscansize != 0) && (ctx->engine->maxscansize - ctx->scansize < needed)) {
+        /* The size needed is greater than the remaining scansize ... Skip this file. */
+        cli_dbgmsg("%s: scansize exceeded (initial: %lu, consumed: %lu, needed: %lu)\n", who, ctx->engine->maxscansize, ctx->scansize, needed);
         ret = CL_EMAXSIZE;
-        cli_append_virus_if_heur_exceedsmax(ctx, "Heuristics.Limits.Exceeded.MaxFileSize");
+        cli_append_potentially_unwanted_if_heur_exceedsmax(ctx, "Heuristics.Limits.Exceeded.MaxScanSize");
+        goto done;
     }
 
-    /* Enforce limit on number of embedded files */
-    if (ctx->engine->maxfiles && ctx->scannedfiles >= ctx->engine->maxfiles) {
-        /* Abort the scan ... */
+    /* Enforce per-file file-size limit, if limit enabled */
+    if (needed && (ctx->engine->maxfilesize != 0) && (ctx->engine->maxfilesize < needed)) {
+        /* The size needed is greater than that limit ... Skip this file. */
+        cli_dbgmsg("%s: filesize exceeded (allowed: %lu, needed: %lu)\n", who, ctx->engine->maxfilesize, needed);
+        ret = CL_EMAXSIZE;
+        cli_append_potentially_unwanted_if_heur_exceedsmax(ctx, "Heuristics.Limits.Exceeded.MaxFileSize");
+        goto done;
+    }
+
+    /* Enforce limit on number of embedded files, if limit enabled */
+    if ((ctx->engine->maxfiles != 0) && (ctx->scannedfiles >= ctx->engine->maxfiles)) {
+        /* This file would exceed the max # of files ... Skip this file. */
         cli_dbgmsg("%s: files limit reached (max: %u)\n", who, ctx->engine->maxfiles);
         ret = CL_EMAXFILES;
-        cli_append_virus_if_heur_exceedsmax(ctx, "Heuristics.Limits.Exceeded.MaxFiles");
-        ctx->abort_scan = true;
+        cli_append_potentially_unwanted_if_heur_exceedsmax(ctx, "Heuristics.Limits.Exceeded.MaxFiles");
+
+        // We don't need to set the `ctx->abort_scan` flag here.
+        // We want `cli_magic_scan()` to finish scanning the current file, but not any future files.
+        // We keep track of the # scanned files with `ctx->scannedfiles`, and that should be sufficient to prevent
+        // additional files from being scanned.
+        goto done;
     }
+
+done:
 
     return ret;
 }
@@ -1191,10 +1214,8 @@ cl_error_t cli_checktimelimit(cli_ctx *ctx)
     if (ctx->time_limit.tv_sec != 0) {
         struct timeval now;
         if (gettimeofday(&now, NULL) == 0) {
-            if (now.tv_sec > ctx->time_limit.tv_sec) {
-                ctx->abort_scan = true;
-                ret             = CL_ETIMEOUT;
-            } else if (now.tv_sec == ctx->time_limit.tv_sec && now.tv_usec > ctx->time_limit.tv_usec) {
+            if ((now.tv_sec > ctx->time_limit.tv_sec) ||
+                (now.tv_sec == ctx->time_limit.tv_sec && now.tv_usec > ctx->time_limit.tv_usec)) {
                 ctx->abort_scan = true;
                 ret             = CL_ETIMEOUT;
             }
@@ -1202,7 +1223,10 @@ cl_error_t cli_checktimelimit(cli_ctx *ctx)
     }
 
     if (CL_ETIMEOUT == ret) {
-        cli_append_virus_if_heur_exceedsmax(ctx, "Heuristics.Limits.Exceeded.MaxScanTime");
+        cli_append_potentially_unwanted_if_heur_exceedsmax(ctx, "Heuristics.Limits.Exceeded.MaxScanTime");
+
+        // abort_scan flag is set so that in cli_magic_scan() we *will* stop scanning, even if we lose the status code.
+        ctx->abort_scan = true;
     }
 
 done:
@@ -1245,7 +1269,7 @@ char *cli_hashstream(FILE *fs, unsigned char *digcpy, int type)
 
     cl_finish_hash(ctx, digest);
 
-    if (!(hashstr = (char *)cli_calloc(size * 2 + 1, sizeof(char))))
+    if (!(hashstr = (char *)calloc(size * 2 + 1, sizeof(char))))
         return NULL;
 
     pt = hashstr;
@@ -1279,7 +1303,7 @@ char *cli_hashfile(const char *filename, int type)
 /* Function: unlink
         unlink() with error checking
 */
-int cli_unlink(const char *pathname)
+cl_error_t cli_unlink(const char *pathname)
 {
     if (unlink(pathname) == -1) {
 #ifdef _WIN32
@@ -1287,101 +1311,172 @@ int cli_unlink(const char *pathname)
          * even if the user has permissions to delete the file. */
         if (-1 == _chmod(pathname, _S_IWRITE)) {
             char err[128];
-            cli_warnmsg("cli_unlink: _chmod failure - %s\n", cli_strerror(errno, err, sizeof(err)));
-            return 1;
+            cli_warnmsg("cli_unlink: _chmod failure for %s - %s\n", pathname, cli_strerror(errno, err, sizeof(err)));
+            return CL_EUNLINK;
         } else if (unlink(pathname) == -1) {
             char err[128];
-            cli_warnmsg("cli_unlink: unlink failure - %s\n", cli_strerror(errno, err, sizeof(err)));
-            return 1;
+            cli_warnmsg("cli_unlink: unlink failure for %s - %s\n", pathname, cli_strerror(errno, err, sizeof(err)));
+            return CL_EUNLINK;
         }
-        return 0;
+        return CL_SUCCESS;
 #else
         char err[128];
-        cli_warnmsg("cli_unlink: unlink failure - %s\n", cli_strerror(errno, err, sizeof(err)));
-        return 1;
+        cli_warnmsg("cli_unlink: unlink failure for %s - %s\n", pathname, cli_strerror(errno, err, sizeof(err)));
+        return CL_EUNLINK;
 #endif
     }
-    return 0;
+    return CL_SUCCESS;
 }
 
-void cli_virus_found_cb(cli_ctx *ctx)
+void cli_virus_found_cb(cli_ctx *ctx, const char *virname)
 {
-    if (ctx->engine->cb_virus_found)
-        ctx->engine->cb_virus_found(fmap_fd(ctx->fmap), (const char *)*ctx->virname, ctx->cb_ctx);
-}
-
-cl_error_t cli_append_possibly_unwanted(cli_ctx *ctx, const char *virname)
-{
-    if (SCAN_ALLMATCHES) {
-        return cli_append_virus(ctx, virname);
-    } else if (SCAN_HEURISTIC_PRECEDENCE) {
-        return cli_append_virus(ctx, virname);
-    } else if (ctx->num_viruses == 0 && ctx->virname != NULL && *ctx->virname == NULL) {
-        ctx->found_possibly_unwanted = 1;
-        ctx->num_viruses++;
-        *ctx->virname = virname;
+    if (ctx->engine->cb_virus_found) {
+        ctx->engine->cb_virus_found(
+            fmap_fd(ctx->fmap),
+            virname,
+            ctx->cb_ctx);
     }
-    return CL_CLEAN;
 }
 
-cl_error_t cli_append_virus(cli_ctx *ctx, const char *virname)
+/**
+ * @brief Add an indicator to the scan evidence.
+ *
+ * @param ctx
+ * @param virname Name of the indicator
+ * @param type Type of the indicator
+ * @return Returns CL_SUCCESS if added and IS in ALLMATCH mode, or if was PUA and not in HEURISTIC-PRECEDENCE-mode.
+ * @return Returns CL_VIRUS if added and NOT in ALLMATCH mode, or if was PUA and not in ALLMATCH but IS in HEURISTIC-PRECEDENCE-mode.
+ * @return Returns some other error code like CL_ERROR or CL_EMEM if something went wrong.
+ */
+static cl_error_t append_virus(cli_ctx *ctx, const char *virname, IndicatorType type)
 {
-    if (ctx->virname == NULL) {
-        return CL_CLEAN;
+    cl_error_t status             = CL_ERROR;
+    FFIError *add_indicator_error = NULL;
+    bool add_successful;
+
+    char *location = NULL;
+
+    if (ctx->evidence == NULL) {
+        // evidence storage not initialized, cannot continue.
+        status = CL_SUCCESS;
+        goto done;
     }
+
     if ((ctx->fmap != NULL) &&
         (ctx->recursion_stack != NULL) &&
         (CL_VIRUS != cli_check_fp(ctx, virname))) {
-        return CL_CLEAN;
-    }
-    if (!SCAN_ALLMATCHES && ctx->num_viruses != 0) {
-        if (SCAN_HEURISTIC_PRECEDENCE) {
-            return CL_CLEAN;
-        }
+        // FP signature found for one of the layers. Ignore indicator.
+        status = CL_SUCCESS;
+        goto done;
     }
 
-    ctx->num_viruses++;
-    *ctx->virname = virname;
-    cli_virus_found_cb(ctx);
+    add_successful = evidence_add_indicator(
+        ctx->evidence,
+        virname,
+        type,
+        &add_indicator_error);
+    if (!add_successful) {
+        cli_errmsg("Failed to add indicator to scan evidence: %s\n", ffierror_fmt(add_indicator_error));
+        status = CL_ERROR;
+        goto done;
+    }
 
-#if HAVE_JSON
+    if (type == IndicatorType_Strong) {
+        // Run that virus callback which in clamscan says "<signature name> FOUND"
+        cli_virus_found_cb(ctx, virname);
+    }
+
     if (SCAN_COLLECT_METADATA && ctx->wrkproperty) {
         json_object *arrobj, *virobj;
         if (!json_object_object_get_ex(ctx->wrkproperty, "Viruses", &arrobj)) {
             arrobj = json_object_new_array();
             if (NULL == arrobj) {
                 cli_errmsg("cli_append_virus: no memory for json virus array\n");
-                return CL_EMEM;
+                status = CL_EMEM;
+                goto done;
             }
             json_object_object_add(ctx->wrkproperty, "Viruses", arrobj);
         }
         virobj = json_object_new_string(virname);
         if (NULL == virobj) {
             cli_errmsg("cli_append_virus: no memory for json virus name object\n");
-            return CL_EMEM;
+            status = CL_EMEM;
+            goto done;
         }
         json_object_array_add(arrobj, virobj);
     }
-#endif
-    return CL_VIRUS;
+
+    if (SCAN_ALLMATCHES) {
+        // Never break.
+        status = CL_SUCCESS;
+    } else {
+        // Usually break.
+        switch (type) {
+            case IndicatorType_Strong: {
+                status = CL_VIRUS;
+                // abort_scan flag is set so that in cli_magic_scan() we *will* stop scanning, even if we lose the status code.
+                ctx->abort_scan = true;
+                break;
+            }
+            case IndicatorType_PotentiallyUnwanted: {
+                status = CL_SUCCESS;
+                break;
+            }
+            default: {
+                status = CL_SUCCESS;
+            }
+        }
+    }
+
+done:
+    if (NULL != location) {
+        free(location);
+    }
+
+    return status;
+}
+
+cl_error_t cli_append_potentially_unwanted(cli_ctx *ctx, const char *virname)
+{
+    if (SCAN_HEURISTIC_PRECEDENCE) {
+        return append_virus(ctx, virname, IndicatorType_Strong);
+    } else {
+        return append_virus(ctx, virname, IndicatorType_PotentiallyUnwanted);
+    }
+}
+
+cl_error_t cli_append_virus(cli_ctx *ctx, const char *virname)
+{
+    if ((strncmp(virname, "PUA.", 4) == 0) ||
+        (strncmp(virname, "Heuristics.", 11) == 0) ||
+        (strncmp(virname, "BC.Heuristics.", 14) == 0)) {
+        return cli_append_potentially_unwanted(ctx, virname);
+    } else {
+        return append_virus(ctx, virname, IndicatorType_Strong);
+    }
 }
 
 const char *cli_get_last_virus(const cli_ctx *ctx)
 {
-    if (!ctx || !ctx->virname || !(*ctx->virname))
+    if (!ctx || !ctx->evidence) {
         return NULL;
-    return *ctx->virname;
+    }
+
+    return evidence_get_last_alert(ctx->evidence);
 }
 
 const char *cli_get_last_virus_str(const cli_ctx *ctx)
 {
     const char *ret;
-    if ((ret = cli_get_last_virus(ctx)))
+
+    if (NULL != (ret = cli_get_last_virus(ctx))) {
         return ret;
+    }
+
     return "";
 }
 
-cl_error_t cli_recursion_stack_push(cli_ctx *ctx, cl_fmap_t *map, cli_file_t type, bool is_new_buffer)
+cl_error_t cli_recursion_stack_push(cli_ctx *ctx, cl_fmap_t *map, cli_file_t type, bool is_new_buffer, uint32_t attributes)
 {
     cl_error_t status = CL_SUCCESS;
 
@@ -1389,7 +1484,7 @@ cl_error_t cli_recursion_stack_push(cli_ctx *ctx, cl_fmap_t *map, cli_file_t typ
     recursion_level_t *new_container     = NULL;
 
     // Check the regular limits
-    if (CL_SUCCESS != (status = cli_checklimits("cli_updatelimits", ctx, map->len, 0, 0))) {
+    if (CL_SUCCESS != (status = cli_checklimits("cli_recursion_stack_push", ctx, map->len, 0, 0))) {
         cli_dbgmsg("cli_recursion_stack_push: Some content was skipped. The scan result will not be cached.\n");
         emax_reached(ctx); // Disable caching for all recursion layers.
         goto done;
@@ -1400,7 +1495,7 @@ cl_error_t cli_recursion_stack_push(cli_ctx *ctx, cl_fmap_t *map, cli_file_t typ
         cli_dbgmsg("cli_recursion_stack_push: Archive recursion limit exceeded (%u, max: %u)\n", ctx->recursion_level, ctx->engine->max_recursion_level);
         cli_dbgmsg("cli_recursion_stack_push: Some content was skipped. The scan result will not be cached.\n");
         emax_reached(ctx); // Disable caching for all recursion layers.
-        cli_append_virus_if_heur_exceedsmax(ctx, "Heuristics.Limits.Exceeded.MaxRecursion");
+        cli_append_potentially_unwanted_if_heur_exceedsmax(ctx, "Heuristics.Limits.Exceeded.MaxRecursion");
         status = CL_EMAXREC;
         goto done;
     }
@@ -1422,17 +1517,23 @@ cl_error_t cli_recursion_stack_push(cli_ctx *ctx, cl_fmap_t *map, cli_file_t typ
         new_container->recursion_level_buffer_fmap = current_container->recursion_level_buffer_fmap + 1;
     }
 
-    if (ctx->next_layer_is_normalized) {
-        // Normalized layers should be ignored when using the get_type() and get_intermediate_type()
-        // functions so that signatures that specify the container or intermediates need not account
-        // for normalized layers "contained in" HTML / Javascript / etc.
-        new_container->is_normalized_layer = true;
-        ctx->next_layer_is_normalized      = false;
+    // Apply the requested next-layer attributes.
+    //
+    // Note that this is how we also keep track of normalized layers.
+    // Normalized layers should be ignored when using the get_type() and get_intermediate_type()
+    // functions so that signatures that specify the container or intermediates need not account
+    // for normalized layers "contained in" HTML / Javascript / etc.
+    new_container->attributes = attributes;
+
+    // If the current layer is marked "decrypted", all child-layers are also marked "decrypted".
+    if (current_container->attributes & LAYER_ATTRIBUTES_DECRYPTED) {
+        new_container->attributes |= LAYER_ATTRIBUTES_DECRYPTED;
     }
 
     ctx->fmap = new_container->fmap;
 
 done:
+
     return status;
 }
 
@@ -1497,7 +1598,7 @@ static int recursion_stack_get(cli_ctx *ctx, int index)
     }
 
     while (current_layer >= desired_layer && current_layer > 0) {
-        if (ctx->recursion_stack[current_layer].is_normalized_layer) {
+        if (ctx->recursion_stack[current_layer].attributes & LAYER_ATTRIBUTES_NORMALIZED) {
             // The current layer is normalized, so we should step back an extra layer
             // It's okay if desired_layer goes negative.
             desired_layer--;
@@ -1552,7 +1653,7 @@ size_t cli_recursion_stack_get_size(cli_ctx *ctx, int index)
 /*
  * Windows doesn't allow you to delete a directory while it is still open
  */
-int cli_rmdirs(const char *name)
+int cli_rmdirs(const char *dirname)
 {
     int rc;
     STATBUF statb;
@@ -1560,17 +1661,17 @@ int cli_rmdirs(const char *name)
     struct dirent *dent;
     char err[128];
 
-    if (CLAMSTAT(name, &statb) < 0) {
-        cli_warnmsg("cli_rmdirs: Can't locate %s: %s\n", name, cli_strerror(errno, err, sizeof(err)));
+    if (CLAMSTAT(dirname, &statb) < 0) {
+        cli_warnmsg("cli_rmdirs: Can't locate %s: %s\n", dirname, cli_strerror(errno, err, sizeof(err)));
         return -1;
     }
 
     if (!S_ISDIR(statb.st_mode)) {
-        if (cli_unlink(name)) return -1;
+        if (cli_unlink(dirname)) return -1;
         return 0;
     }
 
-    if ((dd = opendir(name)) == NULL)
+    if ((dd = opendir(dirname)) == NULL)
         return -1;
 
     rc = 0;
@@ -1583,15 +1684,14 @@ int cli_rmdirs(const char *name)
         if (strcmp(dent->d_name, "..") == 0)
             continue;
 
-        path = cli_malloc(strlen(name) + strlen(dent->d_name) + 2);
-
+        path = malloc(strlen(dirname) + strlen(dent->d_name) + 2);
         if (path == NULL) {
-            cli_errmsg("cli_rmdirs: Unable to allocate memory for path %u\n", strlen(name) + strlen(dent->d_name) + 2);
+            cli_errmsg("cli_rmdirs: Unable to allocate memory for path %u\n", strlen(dirname) + strlen(dent->d_name) + 2);
             closedir(dd);
             return -1;
         }
 
-        sprintf(path, "%s\\%s", name, dent->d_name);
+        sprintf(path, "%s\\%s", dirname, dent->d_name);
         rc = cli_rmdirs(path);
         free(path);
         if (rc != 0)
@@ -1600,8 +1700,8 @@ int cli_rmdirs(const char *name)
 
     closedir(dd);
 
-    if (rmdir(name) < 0) {
-        cli_errmsg("cli_rmdirs: Can't remove temporary directory %s: %s\n", name, cli_strerror(errno, err, sizeof(err)));
+    if (rmdir(dirname) < 0) {
+        cli_errmsg("cli_rmdirs: Can't remove temporary directory %s: %s\n", dirname, cli_strerror(errno, err, sizeof(err)));
         return -1;
     }
 
@@ -1629,7 +1729,7 @@ int cli_rmdirs(const char *dirname)
             while ((dent = readdir(dd))) {
                 if (dent->d_ino) {
                     if (strcmp(dent->d_name, ".") && strcmp(dent->d_name, "..")) {
-                        path = cli_malloc(strlen(dirname) + strlen(dent->d_name) + 2);
+                        path = malloc(strlen(dirname) + strlen(dent->d_name) + 2);
                         if (!path) {
                             cli_errmsg("cli_rmdirs: Unable to allocate memory for path %llu\n", (long long unsigned)(strlen(dirname) + strlen(dent->d_name) + 2));
                             closedir(dd);
@@ -1701,13 +1801,13 @@ bitset_t *cli_bitset_init(void)
 {
     bitset_t *bs;
 
-    bs = cli_malloc(sizeof(bitset_t));
+    bs = malloc(sizeof(bitset_t));
     if (!bs) {
         cli_errmsg("cli_bitset_init: Unable to allocate memory for bs %llu\n", (long long unsigned)sizeof(bitset_t));
         return NULL;
     }
     bs->length = BITSET_DEFAULT_SIZE;
-    bs->bitset = cli_calloc(BITSET_DEFAULT_SIZE, 1);
+    bs->bitset = calloc(BITSET_DEFAULT_SIZE, 1);
     if (!bs->bitset) {
         cli_errmsg("cli_bitset_init: Unable to allocate memory for bs->bitset %u\n", BITSET_DEFAULT_SIZE);
         free(bs);
@@ -1733,7 +1833,7 @@ static bitset_t *bitset_realloc(bitset_t *bs, unsigned long min_size)
     unsigned char *new_bitset;
 
     new_length = nearest_power(min_size);
-    new_bitset = (unsigned char *)cli_realloc(bs->bitset, new_length);
+    new_bitset = (unsigned char *)cli_max_realloc(bs->bitset, new_length);
     if (!new_bitset) {
         return NULL;
     }
@@ -1776,6 +1876,11 @@ int cli_bitset_test(bitset_t *bs, unsigned long bit_offset)
 void cl_engine_set_clcb_pre_cache(struct cl_engine *engine, clcb_pre_cache callback)
 {
     engine->cb_pre_cache = callback;
+}
+
+void cl_engine_set_clcb_file_inspection(struct cl_engine *engine, clcb_file_inspection callback)
+{
+    engine->cb_file_inspection = callback;
 }
 
 void cl_engine_set_clcb_pre_scan(struct cl_engine *engine, clcb_pre_scan callback)
@@ -1830,6 +1935,11 @@ void cl_engine_set_clcb_meta(struct cl_engine *engine, clcb_meta callback)
 void cl_engine_set_clcb_file_props(struct cl_engine *engine, clcb_file_props callback)
 {
     engine->cb_file_props = callback;
+}
+
+void cl_engine_set_clcb_vba(struct cl_engine *engine, clcb_generic_data callback)
+{
+    engine->cb_vba = callback;
 }
 
 uint8_t cli_get_debug_flag()

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *  Copyright (C) 2007-2013 Sourcefire, Inc.
  *
  *  Authors: Tomasz Kojm, Nigel Horne, Török Edvin
@@ -134,7 +134,7 @@ uint16_t *cli_hex2ui(const char *hex)
         return NULL;
     }
 
-    str = cli_calloc((len / 2) + 1, sizeof(uint16_t));
+    str = cli_max_calloc((len / 2) + 1, sizeof(uint16_t));
     if (!str)
         return NULL;
 
@@ -158,7 +158,7 @@ char *cli_hex2str(const char *hex)
         return NULL;
     }
 
-    str = cli_calloc((len / 2) + 1, sizeof(char));
+    str = cli_max_calloc((len / 2) + 1, sizeof(char));
     if (!str)
         return NULL;
 
@@ -224,9 +224,9 @@ int cli_xtoi(const char *hex)
     if (len % 2 == 0)
         return cli_hex2num(hex);
 
-    hexbuf = cli_calloc(len + 2, sizeof(char));
+    hexbuf = cli_max_calloc(len + 2, sizeof(char));
     if (hexbuf == NULL) {
-        cli_errmsg("cli_xtoi(): cli_malloc fails.\n");
+        cli_errmsg("cli_xtoi(): cli_max_malloc fails.\n");
         return -1;
     }
 
@@ -244,7 +244,7 @@ char *cli_str2hex(const char *string, unsigned int len)
                   '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
     unsigned int i, j;
 
-    if ((hexstr = (char *)cli_calloc(2 * len + 1, sizeof(char))) == NULL)
+    if ((hexstr = (char *)cli_max_calloc(2 * len + 1, sizeof(char))) == NULL)
         return NULL;
 
     for (i = 0, j = 0; i < len; i++, j += 2) {
@@ -332,7 +332,7 @@ char *cli_strtok(const char *line, int fieldno, const char *delim)
     if (i == j) {
         return NULL;
     }
-    buffer = cli_malloc(j - i + 1);
+    buffer = cli_max_malloc(j - i + 1);
     if (!buffer) {
         cli_errmsg("cli_strtok: Unable to allocate memory for buffer\n");
         return NULL;
@@ -857,32 +857,40 @@ cl_error_t cli_strntoul_wrap(const char *buf, size_t buf_size,
 size_t cli_ldbtokenize(char *buffer, const char delim, const size_t token_count,
                        const char **tokens, size_t token_skip)
 {
-    size_t tokens_found, i;
-    int within_pcre = 0;
-    char *start     = buffer;
+    size_t tokens_found = 0;
+    size_t token_index  = 0;
+    size_t buffer_index = 0;
+    bool within_pcre    = false;
 
-    for (tokens_found = 0; tokens_found < token_count;) {
-        tokens[tokens_found++] = buffer;
+    while (tokens_found < token_count) {
+        tokens[tokens_found++] = &buffer[buffer_index];
 
-        while (*buffer != '\0') {
-            if (!within_pcre && (*buffer == delim))
+        while (buffer[buffer_index] != '\0') {
+            if (!within_pcre && (buffer[buffer_index] == delim)) {
                 break;
-            else if ((tokens_found > token_skip) &&
-                     ((buffer > start) && (*(buffer - 1) != '\\')) &&
-                     (*buffer == '/'))
+            } else if ((tokens_found > token_skip) &&
+                       // LDB PCRE rules must escape the '/' character with a '\'.
+                       // If the character sequence is "\/", then we are still within the PCRE string.
+                       ((buffer_index > 0) && (buffer[buffer_index - 1] != '\\')) && (buffer[buffer_index] == '/')) {
                 within_pcre = !within_pcre;
-            buffer++;
+            }
+            buffer_index++;
         }
 
-        if (*buffer != '\0') {
-            *buffer++ = '\0';
+        if (buffer[buffer_index] != '\0') {
+            buffer[buffer_index] = '\0';
+            buffer_index++;
         } else {
-            i = tokens_found;
-            while (i < token_count)
-                tokens[i++] = NULL;
+            token_index = tokens_found;
+            while (token_index < token_count) {
+                tokens[token_index] = NULL;
+                token_index++;
+            }
+
             return tokens_found;
         }
     }
+
     return tokens_found;
 }
 
@@ -932,7 +940,7 @@ char *cli_unescape(const char *str)
     const size_t len = strlen(str);
     /* unescaped string is at most as long as original,
      * it will usually be shorter */
-    R = cli_malloc(len + 1);
+    R = cli_max_malloc(len + 1);
     if (!R) {
         cli_errmsg("cli_unescape: Unable to allocate memory for string\n");
         return NULL;
@@ -966,7 +974,7 @@ char *cli_unescape(const char *str)
         R[i++] = c;
     }
     R[i++] = '\0';
-    R      = cli_realloc2(R, i);
+    R      = cli_max_realloc_or_free(R, i);
     return R;
 }
 

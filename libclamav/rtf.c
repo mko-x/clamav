@@ -1,7 +1,7 @@
 /*
  *  Extract embedded objects from RTF files.
  *
- *  Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *  Copyright (C) 2007-2013 Sourcefire, Inc.
  *
  *  Authors: Török Edvin
@@ -156,7 +156,6 @@ static int compare_state(const struct rtf_state* a, const struct rtf_state* b)
 static int push_state(struct stack* stack, struct rtf_state* state)
 {
     int toplevel;
-    size_t defelements;
 
     stack->elements++;
     if (compare_state(state, &base_state)) {
@@ -168,14 +167,15 @@ static int push_state(struct stack* stack, struct rtf_state* state)
         /* grow stack */
         struct rtf_state* states;
         stack->stack_size += 128;
-        states = cli_realloc2(stack->states, stack->stack_size * sizeof(*stack->states));
-        if (!states)
+        states = cli_max_realloc(stack->states, stack->stack_size * sizeof(*stack->states));
+        if (!states) {
+            // Realloc failed. Note that stack->states has not been freed and must still be cleaned up by the caller.
             return CL_EMEM;
+        }
         stack->states = states;
     }
     stack->states[stack->stack_cnt++] = *state;
     toplevel                          = state->encounteredTopLevel;
-    defelements                       = state->default_elements;
 
     *state = base_state;
 
@@ -218,7 +218,7 @@ static int load_actions(table_t* t)
 
 static int rtf_object_begin(struct rtf_state* state, cli_ctx* ctx, const char* tmpdir)
 {
-    struct rtf_object_data* data = cli_malloc(sizeof(*data));
+    struct rtf_object_data* data = malloc(sizeof(*data));
     if (!data) {
         cli_errmsg("rtf_object_begin: Unable to allocate memory for object data\n");
         return CL_EMEM;
@@ -237,19 +237,25 @@ static int rtf_object_begin(struct rtf_state* state, cli_ctx* ctx, const char* t
     return 0;
 }
 
-static int decode_and_scan(struct rtf_object_data* data, cli_ctx* ctx)
+static cl_error_t decode_and_scan(struct rtf_object_data* data, cli_ctx* ctx)
 {
-    int ret = CL_CLEAN;
+    cl_error_t ret = CL_CLEAN;
 
-    cli_dbgmsg("RTF:Scanning embedded object:%s\n", data->name);
-    if (data->bread == 1 && data->fd > 0) {
-        cli_dbgmsg("Decoding ole object\n");
-        ret = cli_scan_ole10(data->fd, ctx);
-    } else if (data->fd > 0)
-        ret = cli_magic_scan_desc(data->fd, data->name, ctx, NULL);
-    if (data->fd > 0)
+    cli_dbgmsg("RTF:Scanning embedded object: %s\n", data->name);
+
+    if (data->fd > 0) {
+        if (data->bread == 1) {
+            cli_dbgmsg("Decoding ole object\n");
+
+            ret = cli_scan_ole10(data->fd, ctx);
+        } else {
+            ret = cli_magic_scan_desc(data->fd, data->name, ctx, NULL, LAYER_ATTRIBUTES_NONE);
+        }
+
         close(data->fd);
-    data->fd = -1;
+        data->fd = -1;
+    }
+
     if (data->name) {
         if (!ctx->engine->keeptmp)
             if (cli_unlink(data->name)) ret = CL_EUNLINK;
@@ -257,9 +263,7 @@ static int decode_and_scan(struct rtf_object_data* data, cli_ctx* ctx)
         data->name = NULL;
     }
 
-    if (ret != CL_CLEAN)
-        return ret;
-    return 0;
+    return ret;
 }
 
 static int rtf_object_process(struct rtf_state* state, const unsigned char* input, const size_t len)
@@ -327,9 +331,9 @@ static int rtf_object_process(struct rtf_state* state, const unsigned char* inpu
                     data->bread = 0;
                     if (data->desc_len > 64) {
                         cli_dbgmsg("Description length too big (%lu), showing only 64 bytes of it\n", (unsigned long int)data->desc_len);
-                        data->desc_name = cli_malloc(65);
+                        data->desc_name = malloc(65);
                     } else
-                        data->desc_name = cli_malloc(data->desc_len + 1);
+                        data->desc_name = cli_max_malloc(data->desc_len + 1);
                     if (!data->desc_name) {
                         cli_errmsg("rtf_object_process: Unable to allocate memory for data->desc_name\n");
                         return CL_EMEM;
@@ -521,7 +525,7 @@ int cli_scanrtf(cli_ctx* ctx)
     stack.stack_size = 16;
     stack.elements   = 0;
     stack.warned     = 0;
-    stack.states     = cli_malloc(stack.stack_size * sizeof(*stack.states));
+    stack.states     = cli_max_malloc(stack.stack_size * sizeof(*stack.states));
 
     if (!stack.states) {
         cli_errmsg("ScanRTF: Unable to allocate memory for stack states\n");

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *  Copyright (C) 2007-2013 Sourcefire, Inc.
  *
  *  Authors: Tomasz Kojm, Török Edvin
@@ -189,14 +189,16 @@ int conn_reply_errno(const client_conn_t *conn, const char *path,
  */
 int command(client_conn_t *conn, int *virus)
 {
-    int desc                        = conn->sd;
-    struct cl_engine *engine        = conn->engine;
-    struct cl_scan_options *options = conn->options;
-    const struct optstruct *opts    = conn->opts;
-    enum scan_type type             = TYPE_INIT;
+    int desc                 = conn->sd;
+    struct cl_engine *engine = conn->engine;
+    struct cl_scan_options options;
+    const struct optstruct *opts = conn->opts;
+    enum scan_type type          = TYPE_INIT;
     int maxdirrec;
     int ret   = 0;
     int flags = CLI_FTW_STD;
+
+    memcpy(&options, conn->options, sizeof(struct cl_scan_options));
 
     struct scan_cb_data scandata;
     struct cli_ftw_cbdata data;
@@ -218,7 +220,7 @@ int command(client_conn_t *conn, int *virus)
     scandata.group         = conn->group;
     scandata.odesc         = desc;
     scandata.conn          = conn;
-    scandata.options       = options;
+    scandata.options       = &options;
     scandata.engine        = engine;
     scandata.opts          = opts;
     scandata.thr_pool      = conn->thrpool;
@@ -296,7 +298,7 @@ int command(client_conn_t *conn, int *virus)
                 conn_reply_error(conn, "FILDES: didn't receive file descriptor.");
                 return 1;
             } else {
-                ret = scanfd(conn, NULL, engine, options, opts, desc, 0);
+                ret = scanfd(conn, NULL, engine, &options, opts, desc, 0);
                 if (ret == CL_VIRUS) {
                     *virus = 1;
                     ret    = 0;
@@ -327,7 +329,7 @@ int command(client_conn_t *conn, int *virus)
             return 0;
         case COMMAND_INSTREAMSCAN:
             thrmgr_setactivetask(NULL, "INSTREAM");
-            ret = scanfd(conn, NULL, engine, options, opts, desc, 1);
+            ret = scanfd(conn, NULL, engine, &options, opts, desc, 1);
             if (ret == CL_VIRUS) {
                 *virus = 1;
                 ret    = 0;
@@ -589,8 +591,9 @@ int execute_or_dispatch_command(client_conn_t *conn, enum commands cmd, const ch
         }
         case COMMAND_INSTREAM: {
             int rc = cli_gentempfd(optget(conn->opts, "TemporaryDirectory")->strarg, &conn->filename, &conn->scanfd);
-            if (rc != CL_SUCCESS)
-                return rc;
+            if (rc != CL_SUCCESS) {
+                return 1;
+            }
             conn->quota = optget(conn->opts, "StreamMaxLength")->numarg;
             conn->mode  = MODE_STREAM;
             return 0;

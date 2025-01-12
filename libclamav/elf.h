@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *  Copyright (C) 2007-2013 Sourcefire, Inc.
  *
  *  Authors: Tomasz Kojm
@@ -143,10 +143,10 @@ struct elf_section_hdr64 {
 
 /* Exposed functions */
 
-int cli_scanelf(cli_ctx *ctx);
+cl_error_t cli_scanelf(cli_ctx *ctx);
 
-int cli_elfheader(cli_ctx *ctx, struct cli_exe_info *elfinfo);
+cl_error_t cli_elfheader(cli_ctx *ctx, struct cli_exe_info *elfinfo);
 
-int cli_unpackelf(cli_ctx *ctx);
+cl_error_t cli_unpackelf(cli_ctx *ctx);
 
 #endif

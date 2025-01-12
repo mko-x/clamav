@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *  Copyright (C) 2007-2013 Sourcefire, Inc.
  *
  *  Authors: Tomasz Kojm
@@ -99,8 +99,8 @@ static uint64_t cli_rawaddr64(uint64_t vaddr, struct elf_program_hdr64 *ph, uint
 }
 
 /* Return converted endian-fixed header, or error code */
-static int cli_elf_fileheader(cli_ctx *ctx, fmap_t *map, union elf_file_hdr *file_hdr,
-                              uint8_t *do_convert, uint8_t *is64)
+static cl_error_t cli_elf_fileheader(cli_ctx *ctx, fmap_t *map, union elf_file_hdr *file_hdr,
+                                     uint8_t *do_convert, uint8_t *is64)
 {
     uint8_t format64, conv;
 
@@ -127,7 +127,7 @@ static int cli_elf_fileheader(cli_ctx *ctx, fmap_t *map, union elf_file_hdr *fil
             break;
         default:
             cli_dbgmsg("ELF: Unknown ELF class (%u)\n", file_hdr->hdr64.e_ident[4]);
-            if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_virus(ctx, "Heuristics.Broken.Executable"))) {
+            if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Executable"))) {
                 return CL_VIRUS;
             }
             return CL_BREAK;
@@ -220,7 +220,7 @@ static int cli_elf_ph32(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
     cli_dbgmsg("ELF: Number of program headers: %d\n", phnum);
     if (phnum > 128) {
         cli_dbgmsg("ELF: Suspicious number of program headers\n");
-        if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_virus(ctx, "Heuristics.Broken.Executable"))) {
+        if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Executable"))) {
             return CL_VIRUS;
         }
         return CL_EFORMAT;
@@ -232,7 +232,7 @@ static int cli_elf_ph32(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
         /* Sanity check */
         if (phentsize != sizeof(struct elf_program_hdr32)) {
             cli_dbgmsg("ELF: phentsize != sizeof(struct elf_program_hdr32)\n");
-            if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_virus(ctx, "Heuristics.Broken.Executable"))) {
+            if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Executable"))) {
                 return CL_VIRUS;
             }
             return CL_EFORMAT;
@@ -244,7 +244,7 @@ static int cli_elf_ph32(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
         }
 
         if (phnum) {
-            program_hdr = (struct elf_program_hdr32 *)cli_calloc(phnum, sizeof(struct elf_program_hdr32));
+            program_hdr = (struct elf_program_hdr32 *)cli_max_calloc(phnum, sizeof(struct elf_program_hdr32));
             if (!program_hdr) {
                 cli_errmsg("ELF: Can't allocate memory for program headers\n");
                 return CL_EMEM;
@@ -266,7 +266,7 @@ static int cli_elf_ph32(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
                     cli_dbgmsg("ELF: Possibly broken ELF file\n");
                 }
                 free(program_hdr);
-                if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_virus(ctx, "Heuristics.Broken.Executable"))) {
+                if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Executable"))) {
                     return CL_VIRUS;
                 }
                 return CL_BREAK;
@@ -287,7 +287,7 @@ static int cli_elf_ph32(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
         free(program_hdr);
         if (err) {
             cli_dbgmsg("ELF: Can't calculate file offset of entry point\n");
-            if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_virus(ctx, "Heuristics.Broken.Executable"))) {
+            if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Executable"))) {
                 return CL_VIRUS;
             }
             return CL_EFORMAT;
@@ -306,8 +306,8 @@ static int cli_elf_ph32(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
 }
 
 /* Read 64-bit program headers */
-static int cli_elf_ph64(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
-                        struct elf_file_hdr64 *file_hdr, uint8_t conv)
+static cl_error_t cli_elf_ph64(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
+                               struct elf_file_hdr64 *file_hdr, uint8_t conv)
 {
     struct elf_program_hdr64 *program_hdr = NULL;
     uint16_t phnum, phentsize;
@@ -320,7 +320,7 @@ static int cli_elf_ph64(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
     cli_dbgmsg("ELF: Number of program headers: %d\n", phnum);
     if (phnum > 128) {
         cli_dbgmsg("ELF: Suspicious number of program headers\n");
-        if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_virus(ctx, "Heuristics.Broken.Executable"))) {
+        if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Executable"))) {
             return CL_VIRUS;
         }
         return CL_EFORMAT;
@@ -332,7 +332,7 @@ static int cli_elf_ph64(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
         /* Sanity check */
         if (phentsize != sizeof(struct elf_program_hdr64)) {
             cli_dbgmsg("ELF: phentsize != sizeof(struct elf_program_hdr64)\n");
-            if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_virus(ctx, "Heuristics.Broken.Executable"))) {
+            if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Executable"))) {
                 return CL_VIRUS;
             }
             return CL_EFORMAT;
@@ -344,7 +344,7 @@ static int cli_elf_ph64(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
         }
 
         if (phnum) {
-            program_hdr = (struct elf_program_hdr64 *)cli_calloc(phnum, sizeof(struct elf_program_hdr64));
+            program_hdr = (struct elf_program_hdr64 *)cli_max_calloc(phnum, sizeof(struct elf_program_hdr64));
             if (!program_hdr) {
                 cli_errmsg("ELF: Can't allocate memory for program headers\n");
                 return CL_EMEM;
@@ -366,7 +366,7 @@ static int cli_elf_ph64(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
                     cli_dbgmsg("ELF: Possibly broken ELF file\n");
                 }
                 free(program_hdr);
-                if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_virus(ctx, "Heuristics.Broken.Executable"))) {
+                if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Executable"))) {
                     return CL_VIRUS;
                 }
                 return CL_BREAK;
@@ -387,7 +387,7 @@ static int cli_elf_ph64(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
         free(program_hdr);
         if (err) {
             cli_dbgmsg("ELF: Can't calculate file offset of entry point\n");
-            if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_virus(ctx, "Heuristics.Broken.Executable"))) {
+            if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Executable"))) {
                 return CL_VIRUS;
             }
             return CL_EFORMAT;
@@ -430,7 +430,7 @@ static int cli_elf_sh32(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
     /* Sanity check */
     if (shentsize != sizeof(struct elf_section_hdr32)) {
         cli_dbgmsg("ELF: shentsize != sizeof(struct elf_section_hdr32)\n");
-        if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_virus(ctx, "Heuristics.Broken.Executable"))) {
+        if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Executable"))) {
             return CL_VIRUS;
         }
         return CL_EFORMAT;
@@ -445,7 +445,7 @@ static int cli_elf_sh32(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
         cli_dbgmsg("ELF: Section header table offset: %d\n", shoff);
 
     if (elfinfo) {
-        elfinfo->sections = (struct cli_exe_section *)cli_calloc(shnum, sizeof(struct cli_exe_section));
+        elfinfo->sections = (struct cli_exe_section *)cli_max_calloc(shnum, sizeof(struct cli_exe_section));
         if (!elfinfo->sections) {
             cli_dbgmsg("ELF: Can't allocate memory for section headers\n");
             return CL_EMEM;
@@ -453,7 +453,7 @@ static int cli_elf_sh32(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
     }
 
     if (shnum) {
-        section_hdr = (struct elf_section_hdr32 *)cli_calloc(shnum, shentsize);
+        section_hdr = (struct elf_section_hdr32 *)cli_max_calloc(shnum, shentsize);
         if (!section_hdr) {
             cli_errmsg("ELF: Can't allocate memory for section headers\n");
             return CL_EMEM;
@@ -473,7 +473,7 @@ static int cli_elf_sh32(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
                 cli_dbgmsg("ELF: Possibly broken ELF file\n");
             }
             free(section_hdr);
-            if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_virus(ctx, "Heuristics.Broken.Executable"))) {
+            if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Executable"))) {
                 return CL_VIRUS;
             }
             return CL_BREAK;
@@ -529,7 +529,7 @@ static int cli_elf_sh64(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
     /* Sanity check */
     if (shentsize != sizeof(struct elf_section_hdr64)) {
         cli_dbgmsg("ELF: shentsize != sizeof(struct elf_section_hdr64)\n");
-        if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_virus(ctx, "Heuristics.Broken.Executable"))) {
+        if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Executable"))) {
             return CL_VIRUS;
         }
         return CL_EFORMAT;
@@ -544,7 +544,7 @@ static int cli_elf_sh64(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
         cli_dbgmsg("ELF: Section header table offset: " STDu64 "\n", shoff);
 
     if (elfinfo) {
-        elfinfo->sections = (struct cli_exe_section *)cli_calloc(shnum, sizeof(struct cli_exe_section));
+        elfinfo->sections = (struct cli_exe_section *)cli_max_calloc(shnum, sizeof(struct cli_exe_section));
         if (!elfinfo->sections) {
             cli_dbgmsg("ELF: Can't allocate memory for section headers\n");
             return CL_EMEM;
@@ -552,7 +552,7 @@ static int cli_elf_sh64(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
     }
 
     if (shnum) {
-        section_hdr = (struct elf_section_hdr64 *)cli_calloc(shnum, shentsize);
+        section_hdr = (struct elf_section_hdr64 *)cli_max_calloc(shnum, shentsize);
         if (!section_hdr) {
             cli_errmsg("ELF: Can't allocate memory for section headers\n");
             return CL_EMEM;
@@ -572,7 +572,7 @@ static int cli_elf_sh64(cli_ctx *ctx, fmap_t *map, struct cli_exe_info *elfinfo,
                 cli_dbgmsg("ELF: Possibly broken ELF file\n");
             }
             free(section_hdr);
-            if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_virus(ctx, "Heuristics.Broken.Executable"))) {
+            if (ctx && SCAN_HEURISTIC_BROKEN && (CL_VIRUS == cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Executable"))) {
                 return CL_VIRUS;
             }
             return CL_BREAK;
@@ -672,11 +672,11 @@ static void cli_elf_sectionlog(uint32_t sh_type, uint32_t sh_flags)
 }
 
 /* Scan function for ELF */
-int cli_scanelf(cli_ctx *ctx)
+cl_error_t cli_scanelf(cli_ctx *ctx)
 {
     union elf_file_hdr file_hdr;
     fmap_t *map = ctx->fmap;
-    int ret;
+    cl_error_t ret;
     uint8_t conv = 0, is64 = 0;
 
     cli_dbgmsg("in cli_scanelf\n");
@@ -791,11 +791,11 @@ int cli_scanelf(cli_ctx *ctx)
 /* ELF header parsing only
  * Returns 0 on success, -1 on error
  */
-int cli_elfheader(cli_ctx *ctx, struct cli_exe_info *elfinfo)
+cl_error_t cli_elfheader(cli_ctx *ctx, struct cli_exe_info *elfinfo)
 {
     union elf_file_hdr file_hdr;
     uint8_t conv = 0, is64 = 0;
-    int ret;
+    cl_error_t ret = CL_SUCCESS;
 
     cli_dbgmsg("in cli_elfheader\n");
 
@@ -806,8 +806,8 @@ int cli_elfheader(cli_ctx *ctx, struct cli_exe_info *elfinfo)
     }
 
     ret = cli_elf_fileheader(NULL, ctx->fmap, &file_hdr, &conv, &is64);
-    if (ret != CL_CLEAN) {
-        return -1;
+    if (ret != CL_SUCCESS) {
+        goto done;
     }
 
     /* Program headers and Entry */
@@ -816,8 +816,8 @@ int cli_elfheader(cli_ctx *ctx, struct cli_exe_info *elfinfo)
     } else {
         ret = cli_elf_ph32(NULL, ctx->fmap, elfinfo, &(file_hdr.hdr32.hdr), conv);
     }
-    if (ret != CL_CLEAN) {
-        return -1;
+    if (ret != CL_SUCCESS) {
+        goto done;
     }
 
     /* Section Headers */
@@ -826,65 +826,66 @@ int cli_elfheader(cli_ctx *ctx, struct cli_exe_info *elfinfo)
     } else {
         ret = cli_elf_sh32(NULL, ctx->fmap, elfinfo, &(file_hdr.hdr32.hdr), conv);
     }
-    if (ret != CL_CLEAN) {
-        return -1;
+    if (ret != CL_SUCCESS) {
+        goto done;
     }
 
-    return 0;
+done:
+
+    return ret;
 }
 
 /*
  * ELF file unpacking.
  */
-int cli_unpackelf(cli_ctx *ctx)
+cl_error_t cli_unpackelf(cli_ctx *ctx)
 {
-    char *tempfile;
-    int ndesc;
+    cl_error_t ret = CL_SUCCESS;
+    char *tempfile = NULL;
+    int ndesc      = -1;
     struct cli_bc_ctx *bc_ctx;
-    int ret;
-    fmap_t *map = ctx->fmap;
 
     /* Bytecode BC_ELF_UNPACKER hook */
     bc_ctx = cli_bytecode_context_alloc();
     if (!bc_ctx) {
         cli_errmsg("cli_scanelf: can't allocate memory for bc_ctx\n");
-        return CL_EMEM;
+        ret = CL_EMEM;
+        goto done;
     }
 
     cli_bytecode_context_setctx(bc_ctx, ctx);
 
     cli_dbgmsg("Running bytecode hook\n");
-    ret = cli_bytecode_runhook(ctx, ctx->engine, bc_ctx, BC_ELF_UNPACKER, map);
+    ret = cli_bytecode_runhook(ctx, ctx->engine, bc_ctx, BC_ELF_UNPACKER, ctx->fmap);
     cli_dbgmsg("Finished running bytecode hook\n");
-    switch (ret) {
-        case CL_VIRUS:
-            cli_bytecode_context_destroy(bc_ctx);
-            return CL_VIRUS;
-        case CL_SUCCESS:
-            ndesc = cli_bytecode_context_getresult_file(bc_ctx, &tempfile);
-            cli_bytecode_context_destroy(bc_ctx);
-            if (ndesc != -1 && tempfile) {
-                if (ctx->engine->keeptmp)
-                    cli_dbgmsg("cli_scanelf: Unpacked and rebuilt executable saved in %s\n", tempfile);
-                else
-                    cli_dbgmsg("cli_scanelf: Unpacked and rebuilt executable\n");
-                lseek(ndesc, 0, SEEK_SET);
-                cli_dbgmsg("***** Scanning rebuilt ELF file *****\n");
-                if (cli_magic_scan_desc(ndesc, tempfile, ctx, NULL) == CL_VIRUS) {
-                    close(ndesc);
-                    CLI_TMPUNLK();
-                    free(tempfile);
-                    return CL_VIRUS;
-                }
-                close(ndesc);
-                CLI_TMPUNLK();
-                free(tempfile);
-                return CL_CLEAN;
-            }
-            break;
-        default:
-            cli_bytecode_context_destroy(bc_ctx);
+    if (CL_SUCCESS == ret) {
+        // check for unpacked/rebuilt executable
+        ndesc = cli_bytecode_context_getresult_file(bc_ctx, &tempfile);
+        if (ndesc != -1 && tempfile) {
+            cli_dbgmsg("cli_scanelf: Unpacked and rebuilt ELF executable saved in %s\n", tempfile);
+
+            lseek(ndesc, 0, SEEK_SET);
+
+            cli_dbgmsg("***** Scanning rebuilt ELF file *****\n");
+            ret = cli_magic_scan_desc(ndesc, tempfile, ctx, NULL, LAYER_ATTRIBUTES_NONE);
+        }
     }
 
-    return CL_CLEAN;
+done:
+    // cli_bytecode_context_getresult_file() gives up ownership of temp file, so we must clean it up.
+    if (-1 != ndesc) {
+        close(ndesc);
+    }
+    if (NULL != tempfile) {
+        if (!ctx->engine->keeptmp) {
+            (void)cli_unlink(tempfile);
+        }
+        free(tempfile);
+    }
+
+    if (NULL != bc_ctx) {
+        cli_bytecode_context_destroy(bc_ctx);
+    }
+
+    return ret;
 }

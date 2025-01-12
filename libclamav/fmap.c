@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *  Copyright (C) 2009-2013 Sourcefire, Inc.
  *
  *  Authors: aCaB <acab@clamav.net>
@@ -132,10 +132,10 @@ fmap_t *fmap_check_empty(int fd, off_t offset, size_t len, int *empty, const cha
     m = cl_fmap_open_handle((void *)(ssize_t)fd, offset, len, pread_cb, 1);
     if (!m)
         return NULL;
-    m->mtime = st.st_mtime;
+    m->mtime = (uint64_t)st.st_mtime;
 
     if (NULL != name) {
-        m->name = cli_strdup(name);
+        m->name = cli_safer_strdup(name);
         if (NULL == m->name) {
             funmap(m);
             return NULL;
@@ -152,8 +152,8 @@ static void unmap_win32(fmap_t *m)
         if (NULL != m->data) {
             UnmapViewOfFile(m->data);
         }
-        if (NULL != m->mh) {
-            CloseHandle(m->mh);
+        if (NULL != m->windows_map_handle) {
+            CloseHandle(m->windows_map_handle);
         }
         if (NULL != m->name) {
             free(m->name);
@@ -169,8 +169,8 @@ fmap_t *fmap_check_empty(int fd, off_t offset, size_t len, int *empty, const cha
     STATBUF st;
     fmap_t *m = NULL;
     const void *data;
-    HANDLE fh;
-    HANDLE mh;
+    HANDLE windows_file_handle;
+    HANDLE windows_map_handle;
 
     *empty = 0;
     if (FSTAT(fd, &st)) {
@@ -194,33 +194,33 @@ fmap_t *fmap_check_empty(int fd, off_t offset, size_t len, int *empty, const cha
 
     pages = fmap_align_items(len, pgsz);
 
-    if ((fh = (HANDLE)_get_osfhandle(fd)) == INVALID_HANDLE_VALUE) {
+    if ((windows_file_handle = (HANDLE)_get_osfhandle(fd)) == INVALID_HANDLE_VALUE) {
         cli_errmsg("fmap: cannot get a valid handle for descriptor %d\n", fd);
         return NULL;
     }
-    if (!(mh = CreateFileMapping(fh, NULL, PAGE_READONLY, (DWORD)((len >> 31) >> 1), (DWORD)len, NULL))) {
+    if (!(windows_map_handle = CreateFileMapping(windows_file_handle, NULL, PAGE_READONLY, (DWORD)((len >> 31) >> 1), (DWORD)len, NULL))) {
         cli_errmsg("fmap: cannot create a map of descriptor %d\n", fd);
         return NULL;
     }
-    if (!(data = MapViewOfFile(mh, FILE_MAP_READ, (DWORD)((offset >> 31) >> 1), (DWORD)(offset), len))) {
+    if (!(data = MapViewOfFile(windows_map_handle, FILE_MAP_READ, (DWORD)((offset >> 31) >> 1), (DWORD)(offset), len))) {
         cli_errmsg("fmap: cannot map file descriptor %d\n", fd);
-        CloseHandle(mh);
+        CloseHandle(windows_map_handle);
         return NULL;
     }
     if (!(m = cl_fmap_open_memory(data, len))) {
         cli_errmsg("fmap: cannot allocate fmap_t\n", fd);
         UnmapViewOfFile(data);
-        CloseHandle(mh);
+        CloseHandle(windows_map_handle);
         return NULL;
     }
-    m->handle       = (void *)(size_t)fd;
-    m->handle_is_fd = 1; /* This is probably(?) needed so `fmap_fd()` can return the file descriptor. */
-    m->fh           = fh;
-    m->mh           = mh;
-    m->unmap        = unmap_win32;
+    m->handle              = (void *)(size_t)fd;
+    m->handle_is_fd        = true; /* This is probably(?) needed so `fmap_fd()` can return the file descriptor. */
+    m->windows_file_handle = (void *)windows_file_handle;
+    m->windows_map_handle  = (void *)windows_map_handle;
+    m->unmap               = unmap_win32;
 
     if (NULL != name) {
-        m->name = cli_strdup(name);
+        m->name = cli_safer_strdup(name);
         if (NULL == m->name) {
             funmap(m);
             return NULL;
@@ -243,7 +243,7 @@ fmap_t *fmap_duplicate(cl_fmap_t *map, size_t offset, size_t length, const char 
         goto done;
     }
 
-    duplicate_map = cli_malloc(sizeof(cl_fmap_t));
+    duplicate_map = malloc(sizeof(cl_fmap_t));
     if (!duplicate_map) {
         cli_warnmsg("fmap_duplicate: map allocation failed\n");
         goto done;
@@ -285,13 +285,15 @@ fmap_t *fmap_duplicate(cl_fmap_t *map, size_t offset, size_t length, const char 
         }
 
         /* This also means the hash will be different.
-         * Clear the have_maphash flag.
+         * Clear the have_<hash> flags.
          * It will be calculated when next it is needed. */
-        duplicate_map->have_maphash = false;
+        duplicate_map->have_md5    = false;
+        duplicate_map->have_sha1   = false;
+        duplicate_map->have_sha256 = false;
     }
 
     if (NULL != name) {
-        duplicate_map->name = cli_strdup(name);
+        duplicate_map->name = cli_safer_strdup(name);
         if (NULL == duplicate_map->name) {
             status = CL_EMEM;
             goto done;
@@ -373,13 +375,13 @@ extern cl_fmap_t *cl_fmap_open_handle(void *handle, size_t offset, size_t len,
     bitmap_size = pages * sizeof(uint64_t);
     mapsz       = pages * pgsz;
 
-    m = cli_calloc(1, sizeof(fmap_t));
+    m = calloc(1, sizeof(fmap_t));
     if (!m) {
         cli_warnmsg("fmap: map header allocation failed\n");
         goto done;
     }
 
-    m->bitmap = cli_calloc(1, bitmap_size);
+    m->bitmap = cli_max_calloc(1, bitmap_size);
     if (!m->bitmap) {
         cli_warnmsg("fmap: map header allocation failed\n");
         goto done;
@@ -406,7 +408,7 @@ extern cl_fmap_t *cl_fmap_open_handle(void *handle, size_t offset, size_t len,
     }
 #endif /* ANONYMOUS_MAP */
     if (!use_aging) {
-        m->data = (fmap_t *)cli_malloc(mapsz);
+        m->data = (fmap_t *)cli_max_malloc(mapsz);
     }
     if (!m->data) {
         cli_warnmsg("fmap: map allocation failed\n");
@@ -414,7 +416,7 @@ extern cl_fmap_t *cl_fmap_open_handle(void *handle, size_t offset, size_t len,
     }
     m->handle          = handle;
     m->pread_cb        = pread_cb;
-    m->aging           = use_aging;
+    m->aging           = use_aging != 0 ? true : false;
     m->offset          = offset;
     m->nested_offset   = 0;
     m->len             = len; /* m->nested_offset + m->len = m->real_len */
@@ -422,14 +424,16 @@ extern cl_fmap_t *cl_fmap_open_handle(void *handle, size_t offset, size_t len,
     m->pages           = pages;
     m->pgsz            = pgsz;
     m->paged           = 0;
-    m->dont_cache_flag = 0;
+    m->dont_cache_flag = false;
     m->unmap           = unmap_handle;
     m->need            = handle_need;
     m->need_offstr     = handle_need_offstr;
     m->gets            = handle_gets;
     m->unneed_off      = handle_unneed_off;
-    m->handle_is_fd    = 1;
-    m->have_maphash    = false;
+    m->handle_is_fd    = true;
+    m->have_md5        = false;
+    m->have_sha1       = false;
+    m->have_sha256     = false;
 
     status = CL_SUCCESS;
 
@@ -583,7 +587,7 @@ static int fmap_readpage(fmap_t *m, uint64_t first_page, uint64_t count, uint64_
                             cli_warnmsg("fmap_readpage: fstat failed: %s\n", errtxt);
                             return 1;
                         }
-                        if (m->mtime != st.st_mtime) {
+                        if (m->mtime != (uint64_t)st.st_mtime) {
                             cli_warnmsg("fmap_readpage: file changed as we read it\n");
                             return 1;
                         }
@@ -840,7 +844,7 @@ fmap_t *fmap_open_memory(const void *start, size_t len, const char *name)
     cl_error_t status = CL_ERROR;
 
     int pgsz     = cli_getpagesize();
-    cl_fmap_t *m = cli_calloc(1, sizeof(*m));
+    cl_fmap_t *m = calloc(1, sizeof(*m));
     if (!m) {
         cli_warnmsg("fmap: map allocation failed\n");
         goto done;
@@ -858,7 +862,7 @@ fmap_t *fmap_open_memory(const void *start, size_t len, const char *name)
 
     if (NULL != name) {
         /* Copy the name, if one is given */
-        m->name = cli_strdup(name);
+        m->name = cli_safer_strdup(name);
         if (NULL == m->name) {
             cli_warnmsg("fmap: failed to duplicate map name\n");
             goto done;
@@ -994,7 +998,7 @@ cl_error_t fmap_dump_to_file(fmap_t *map, const char *filepath, const char *tmpd
         if (CL_SUCCESS != cli_basename(filepath, strlen(filepath), &filebase)) {
             cli_dbgmsg("fmap_dump_to_file: Unable to determine basename from filepath.\n");
         } else if ((start_offset != 0) && (end_offset != map->real_len)) {
-            /* If we're only dumping a portion of the file, inlcude the offsets in the prefix,...
+            /* If we're only dumping a portion of the file, include the offsets in the prefix,...
              * e.g. tmp filename will become something like:  filebase.500-1200.<randhex> */
             size_t prefix_len = strlen(filebase) + 1 + SIZE_T_CHARLEN + 1 + SIZE_T_CHARLEN + 1;
             prefix            = malloc(prefix_len);
@@ -1082,7 +1086,45 @@ extern void cl_fmap_close(cl_fmap_t *map)
     funmap(map);
 }
 
-cl_error_t fmap_get_MD5(fmap_t *map, unsigned char **hash)
+cl_error_t fmap_set_hash(fmap_t *map, unsigned char *hash, cli_hash_type_t type)
+{
+    cl_error_t status = CL_SUCCESS;
+
+    if (NULL == map) {
+        cli_errmsg("fmap_set_hash: Attempted to set hash for NULL fmap\n");
+        status = CL_EARG;
+        goto done;
+    }
+    if (NULL == hash) {
+        cli_errmsg("fmap_set_hash: Attempted to set hash to NULL\n");
+        status = CL_EARG;
+        goto done;
+    }
+
+    switch (type) {
+        case CLI_HASH_MD5:
+            memcpy(map->md5, hash, CLI_HASHLEN_MD5);
+            map->have_md5 = true;
+            break;
+        case CLI_HASH_SHA1:
+            memcpy(map->sha1, hash, CLI_HASHLEN_SHA1);
+            map->have_sha1 = true;
+            break;
+        case CLI_HASH_SHA256:
+            memcpy(map->sha256, hash, CLI_HASHLEN_SHA256);
+            map->have_sha256 = true;
+            break;
+        default:
+            cli_errmsg("fmap_set_hash: Unsupported hash type %u\n", type);
+            status = CL_EARG;
+            goto done;
+    }
+
+done:
+    return status;
+}
+
+cl_error_t fmap_get_hash(fmap_t *map, unsigned char **hash, cli_hash_type_t type)
 {
     cl_error_t status = CL_ERROR;
     size_t todo, at = 0;
@@ -1090,41 +1132,109 @@ cl_error_t fmap_get_MD5(fmap_t *map, unsigned char **hash)
 
     todo = map->len;
 
-    if (!map->have_maphash) {
-        /* Need to calculate the hash */
-        hashctx = cl_hash_init("md5");
-        if (!(hashctx)) {
-            cli_errmsg("fmap_get_MD5: error initializing new md5 hash!\n");
+    switch (type) {
+        case CLI_HASH_MD5:
+            if (map->have_md5) {
+                goto complete;
+            }
+            break;
+        case CLI_HASH_SHA1:
+            if (map->have_sha1) {
+                goto complete;
+            }
+            break;
+        case CLI_HASH_SHA256:
+            if (map->have_sha256) {
+                goto complete;
+            }
+            break;
+        default:
+            cli_errmsg("fmap_get_hash: Unsupported hash type %u\n", type);
+            status = CL_EARG;
+            goto done;
+    }
+
+    /*
+     * Need to calculate the hash.
+     */
+
+    switch (type) {
+        case CLI_HASH_MD5:
+            hashctx = cl_hash_init("md5");
+            break;
+        case CLI_HASH_SHA1:
+            hashctx = cl_hash_init("sha1");
+            break;
+        case CLI_HASH_SHA256:
+            hashctx = cl_hash_init("sha256");
+            break;
+        default:
+            cli_errmsg("fmap_get_hash: Unsupported hash type %u\n", type);
+            status = CL_EARG;
+            goto done;
+    }
+    if (!(hashctx)) {
+        cli_errmsg("fmap_get_hash: error initializing new md5 hash!\n");
+        goto done;
+    }
+
+    while (todo) {
+        const void *buf;
+        size_t readme = todo < 1024 * 1024 * 10 ? todo : 1024 * 1024 * 10;
+
+        if (!(buf = fmap_need_off_once(map, at, readme))) {
+            cli_errmsg("fmap_get_hash: error reading while generating hash!\n");
+            status = CL_EREAD;
             goto done;
         }
 
-        while (todo) {
-            const void *buf;
-            size_t readme = todo < 1024 * 1024 * 10 ? todo : 1024 * 1024 * 10;
+        todo -= readme;
+        at += readme;
 
-            if (!(buf = fmap_need_off_once(map, at, readme))) {
-                cli_errmsg("fmap_get_MD5: error reading while generating hash!\n");
-                status = CL_EREAD;
-                goto done;
-            }
-
-            todo -= readme;
-            at += readme;
-
-            if (cl_update_hash(hashctx, (void *)buf, readme)) {
-                cli_errmsg("fmap_get_MD5: error calculating hash!\n");
-                status = CL_EREAD;
-                goto done;
-            }
+        if (cl_update_hash(hashctx, (void *)buf, readme)) {
+            cli_errmsg("fmap_get_hash: error calculating hash!\n");
+            status = CL_EREAD;
+            goto done;
         }
-
-        cl_finish_hash(hashctx, map->maphash);
-        hashctx = NULL;
-
-        map->have_maphash = true;
     }
 
-    *hash = map->maphash;
+    switch (type) {
+        case CLI_HASH_MD5:
+            cl_finish_hash(hashctx, map->md5);
+            map->have_md5 = true;
+            break;
+        case CLI_HASH_SHA1:
+            cl_finish_hash(hashctx, map->sha1);
+            map->have_sha1 = true;
+            break;
+        case CLI_HASH_SHA256:
+            cl_finish_hash(hashctx, map->sha256);
+            map->have_sha256 = true;
+            break;
+        default:
+            cli_errmsg("fmap_get_hash: Unsupported hash type %u\n", type);
+            status = CL_EARG;
+            goto done;
+    }
+    hashctx = NULL;
+
+complete:
+
+    switch (type) {
+        case CLI_HASH_MD5:
+            *hash = map->md5;
+            break;
+        case CLI_HASH_SHA1:
+            *hash = map->sha1;
+            break;
+        case CLI_HASH_SHA256:
+            *hash = map->sha256;
+            break;
+        default:
+            cli_errmsg("fmap_get_hash: Unsupported hash type %u\n", type);
+            status = CL_EARG;
+            goto done;
+    }
 
     status = CL_SUCCESS;
 

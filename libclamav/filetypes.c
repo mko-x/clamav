@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *  Copyright (C) 2007-2013 Sourcefire, Inc.
  *
  *  Authors: Tomasz Kojm
@@ -56,88 +56,93 @@ static const struct ftmap_s {
     const char *name;
     cli_file_t code;
 } ftmap[] = {
-    { "CL_TYPE_TEXT_ASCII",   CL_TYPE_TEXT_ASCII   },
-    { "CL_TYPE_TEXT_UTF8",    CL_TYPE_TEXT_UTF8    },
-    { "CL_TYPE_TEXT_UTF16LE", CL_TYPE_TEXT_UTF16LE },
-    { "CL_TYPE_TEXT_UTF16BE", CL_TYPE_TEXT_UTF16BE },
-    { "CL_TYPE_BINARY_DATA",  CL_TYPE_BINARY_DATA  },
-    { "CL_TYPE_IGNORED",      CL_TYPE_IGNORED      },
-    { "CL_TYPE_ANY",          CL_TYPE_ANY          },
-    { "CL_TYPE_MSEXE",        CL_TYPE_MSEXE        },
-    { "CL_TYPE_ELF",          CL_TYPE_ELF          },
-    { "CL_TYPE_MACHO",        CL_TYPE_MACHO        },
-    { "CL_TYPE_MACHO_UNIBIN", CL_TYPE_MACHO_UNIBIN },
-    { "CL_TYPE_POSIX_TAR",    CL_TYPE_POSIX_TAR    },
-    { "CL_TYPE_OLD_TAR",      CL_TYPE_OLD_TAR      },
-    { "CL_TYPE_CPIO_OLD",     CL_TYPE_CPIO_OLD     },
-    { "CL_TYPE_CPIO_ODC",     CL_TYPE_CPIO_ODC     },
-    { "CL_TYPE_CPIO_NEWC",    CL_TYPE_CPIO_NEWC    },
-    { "CL_TYPE_CPIO_CRC",     CL_TYPE_CPIO_CRC     },
-    { "CL_TYPE_GZ",           CL_TYPE_GZ           },
-    { "CL_TYPE_ZIP",          CL_TYPE_ZIP          },
-    { "CL_TYPE_BZ",           CL_TYPE_BZ           },
-    { "CL_TYPE_RAR",          CL_TYPE_RAR          },
-    { "CL_TYPE_ARJ",          CL_TYPE_ARJ          },
-    { "CL_TYPE_MSSZDD",       CL_TYPE_MSSZDD       },
-    { "CL_TYPE_MSOLE2",       CL_TYPE_MSOLE2       },
-    { "CL_TYPE_MSCAB",        CL_TYPE_MSCAB        },
-    { "CL_TYPE_MSCHM",        CL_TYPE_MSCHM        },
-    { "CL_TYPE_SIS",          CL_TYPE_SIS          },
-    { "CL_TYPE_SCRENC",       CL_TYPE_SCRENC       },
-    { "CL_TYPE_GRAPHICS",     CL_TYPE_GRAPHICS     },
-    { "CL_TYPE_GIF",          CL_TYPE_GIF          },
-    { "CL_TYPE_PNG",          CL_TYPE_PNG          },
-    { "CL_TYPE_JPEG",         CL_TYPE_JPEG         },
-    { "CL_TYPE_TIFF",         CL_TYPE_TIFF         },
-    { "CL_TYPE_RIFF",         CL_TYPE_RIFF         },
-    { "CL_TYPE_BINHEX",       CL_TYPE_BINHEX       },
-    { "CL_TYPE_TNEF",         CL_TYPE_TNEF         },
-    { "CL_TYPE_CRYPTFF",      CL_TYPE_CRYPTFF      },
-    { "CL_TYPE_PDF",          CL_TYPE_PDF          },
-    { "CL_TYPE_UUENCODED",    CL_TYPE_UUENCODED    },
-    { "CL_TYPE_HTML_UTF16",   CL_TYPE_HTML_UTF16   },
-    { "CL_TYPE_SCRIPT",       CL_TYPE_SCRIPT       },
-    { "CL_TYPE_RTF",          CL_TYPE_RTF          },
-    { "CL_TYPE_HTML",         CL_TYPE_HTML         },
-    { "CL_TYPE_MAIL",         CL_TYPE_MAIL         },
-    { "CL_TYPE_SFX",          CL_TYPE_SFX          },
-    { "CL_TYPE_ZIPSFX",       CL_TYPE_ZIPSFX       },
-    { "CL_TYPE_RARSFX",       CL_TYPE_RARSFX       },
-    { "CL_TYPE_CABSFX",       CL_TYPE_CABSFX       },
-    { "CL_TYPE_ARJSFX",       CL_TYPE_ARJSFX       },
-    { "CL_TYPE_NULSFT",       CL_TYPE_NULSFT       },
-    { "CL_TYPE_AUTOIT",       CL_TYPE_AUTOIT       },
-    { "CL_TYPE_ISHIELD_MSI",  CL_TYPE_ISHIELD_MSI  },
-    { "CL_TYPE_7Z",           CL_TYPE_7Z           },
-    { "CL_TYPE_7ZSFX",        CL_TYPE_7ZSFX        },
-    { "CL_TYPE_SWF",          CL_TYPE_SWF          },
-    { "CL_TYPE_ISO9660",      CL_TYPE_ISO9660      },
-    { "CL_TYPE_JAVA",         CL_TYPE_JAVA         },
-    { "CL_TYPE_DMG",          CL_TYPE_DMG          },
-    { "CL_TYPE_MBR",          CL_TYPE_MBR          },
-    { "CL_TYPE_GPT",          CL_TYPE_GPT          },
-    { "CL_TYPE_APM",          CL_TYPE_APM          },
-    { "CL_TYPE_XAR",          CL_TYPE_XAR          },
-    { "CL_TYPE_PART_ANY",     CL_TYPE_PART_ANY     },
-    { "CL_TYPE_PART_HFSPLUS", CL_TYPE_PART_HFSPLUS },
-    { "CL_TYPE_XZ",           CL_TYPE_XZ           },
-    { "CL_TYPE_OOXML_WORD",   CL_TYPE_OOXML_WORD   },
-    { "CL_TYPE_OOXML_PPT",    CL_TYPE_OOXML_PPT    },
-    { "CL_TYPE_OOXML_XL",     CL_TYPE_OOXML_XL     },
-    { "CL_TYPE_INTERNAL",     CL_TYPE_INTERNAL     },
-    { "CL_TYPE_XDP",          CL_TYPE_XDP          },
-    { "CL_TYPE_XML_WORD",     CL_TYPE_XML_WORD     },
-    { "CL_TYPE_XML_XL",       CL_TYPE_XML_XL       },
-    { "CL_TYPE_HWP3",         CL_TYPE_HWP3         },
-    { "CL_TYPE_XML_HWP",      CL_TYPE_XML_HWP      },
-    { "CL_TYPE_HWPOLE2",      CL_TYPE_HWPOLE2      },
-    { "CL_TYPE_OOXML_HWP",    CL_TYPE_OOXML_HWP    },
-    { "CL_TYPE_PS",           CL_TYPE_PS           },
-    { "CL_TYPE_MHTML",        CL_TYPE_MHTML        },
-    { "CL_TYPE_LNK",          CL_TYPE_LNK          },
-    { "CL_TYPE_EGG",          CL_TYPE_EGG          },
-    { "CL_TYPE_EGGSFX",       CL_TYPE_EGGSFX       },
-    { NULL,                   CL_TYPE_IGNORED      }
+    { "CL_TYPE_TEXT_ASCII",         CL_TYPE_TEXT_ASCII      },
+    { "CL_TYPE_TEXT_UTF8",          CL_TYPE_TEXT_UTF8       },
+    { "CL_TYPE_TEXT_UTF16LE",       CL_TYPE_TEXT_UTF16LE    },
+    { "CL_TYPE_TEXT_UTF16BE",       CL_TYPE_TEXT_UTF16BE    },
+    { "CL_TYPE_BINARY_DATA",        CL_TYPE_BINARY_DATA     },
+    { "CL_TYPE_IGNORED",            CL_TYPE_IGNORED         },
+    { "CL_TYPE_ANY",                CL_TYPE_ANY             },
+    { "CL_TYPE_MSEXE",              CL_TYPE_MSEXE           },
+    { "CL_TYPE_ELF",                CL_TYPE_ELF             },
+    { "CL_TYPE_MACHO",              CL_TYPE_MACHO           },
+    { "CL_TYPE_MACHO_UNIBIN",       CL_TYPE_MACHO_UNIBIN    },
+    { "CL_TYPE_POSIX_TAR",          CL_TYPE_POSIX_TAR       },
+    { "CL_TYPE_OLD_TAR",            CL_TYPE_OLD_TAR         },
+    { "CL_TYPE_CPIO_OLD",           CL_TYPE_CPIO_OLD        },
+    { "CL_TYPE_CPIO_ODC",           CL_TYPE_CPIO_ODC        },
+    { "CL_TYPE_CPIO_NEWC",          CL_TYPE_CPIO_NEWC       },
+    { "CL_TYPE_CPIO_CRC",           CL_TYPE_CPIO_CRC        },
+    { "CL_TYPE_GZ",                 CL_TYPE_GZ              },
+    { "CL_TYPE_ZIP",                CL_TYPE_ZIP             },
+    { "CL_TYPE_BZ",                 CL_TYPE_BZ              },
+    { "CL_TYPE_RAR",                CL_TYPE_RAR             },
+    { "CL_TYPE_ARJ",                CL_TYPE_ARJ             },
+    { "CL_TYPE_MSSZDD",             CL_TYPE_MSSZDD          },
+    { "CL_TYPE_MSOLE2",             CL_TYPE_MSOLE2          },
+    { "CL_TYPE_MSCAB",              CL_TYPE_MSCAB           },
+    { "CL_TYPE_MSCHM",              CL_TYPE_MSCHM           },
+    { "CL_TYPE_SIS",                CL_TYPE_SIS             },
+    { "CL_TYPE_SCRENC",             CL_TYPE_SCRENC          },
+    { "CL_TYPE_GRAPHICS",           CL_TYPE_GRAPHICS        },
+    { "CL_TYPE_GIF",                CL_TYPE_GIF             },
+    { "CL_TYPE_PNG",                CL_TYPE_PNG             },
+    { "CL_TYPE_JPEG",               CL_TYPE_JPEG            },
+    { "CL_TYPE_TIFF",               CL_TYPE_TIFF            },
+    { "CL_TYPE_RIFF",               CL_TYPE_RIFF            },
+    { "CL_TYPE_BINHEX",             CL_TYPE_BINHEX          },
+    { "CL_TYPE_TNEF",               CL_TYPE_TNEF            },
+    { "CL_TYPE_CRYPTFF",            CL_TYPE_CRYPTFF         },
+    { "CL_TYPE_PDF",                CL_TYPE_PDF             },
+    { "CL_TYPE_UUENCODED",          CL_TYPE_UUENCODED       },
+    { "CL_TYPE_HTML_UTF16",         CL_TYPE_HTML_UTF16      },
+    { "CL_TYPE_SCRIPT",             CL_TYPE_SCRIPT          },
+    { "CL_TYPE_RTF",                CL_TYPE_RTF             },
+    { "CL_TYPE_HTML",               CL_TYPE_HTML            },
+    { "CL_TYPE_MAIL",               CL_TYPE_MAIL            },
+    { "CL_TYPE_SFX",                CL_TYPE_SFX             },
+    { "CL_TYPE_ZIPSFX",             CL_TYPE_ZIPSFX          },
+    { "CL_TYPE_RARSFX",             CL_TYPE_RARSFX          },
+    { "CL_TYPE_CABSFX",             CL_TYPE_CABSFX          },
+    { "CL_TYPE_ARJSFX",             CL_TYPE_ARJSFX          },
+    { "CL_TYPE_NULSFT",             CL_TYPE_NULSFT          },
+    { "CL_TYPE_AUTOIT",             CL_TYPE_AUTOIT          },
+    { "CL_TYPE_ISHIELD_MSI",        CL_TYPE_ISHIELD_MSI     },
+    { "CL_TYPE_7Z",                 CL_TYPE_7Z              },
+    { "CL_TYPE_7ZSFX",              CL_TYPE_7ZSFX           },
+    { "CL_TYPE_SWF",                CL_TYPE_SWF             },
+    { "CL_TYPE_ISO9660",            CL_TYPE_ISO9660         },
+    { "CL_TYPE_JAVA",               CL_TYPE_JAVA            },
+    { "CL_TYPE_DMG",                CL_TYPE_DMG             },
+    { "CL_TYPE_MBR",                CL_TYPE_MBR             },
+    { "CL_TYPE_GPT",                CL_TYPE_GPT             },
+    { "CL_TYPE_APM",                CL_TYPE_APM             },
+    { "CL_TYPE_XAR",                CL_TYPE_XAR             },
+    { "CL_TYPE_PART_ANY",           CL_TYPE_PART_ANY        },
+    { "CL_TYPE_PART_HFSPLUS",       CL_TYPE_PART_HFSPLUS    },
+    { "CL_TYPE_XZ",                 CL_TYPE_XZ              },
+    { "CL_TYPE_OOXML_WORD",         CL_TYPE_OOXML_WORD      },
+    { "CL_TYPE_OOXML_PPT",          CL_TYPE_OOXML_PPT       },
+    { "CL_TYPE_OOXML_XL",           CL_TYPE_OOXML_XL        },
+    { "CL_TYPE_INTERNAL",           CL_TYPE_INTERNAL        },
+    { "CL_TYPE_XDP",                CL_TYPE_XDP             },
+    { "CL_TYPE_XML_WORD",           CL_TYPE_XML_WORD        },
+    { "CL_TYPE_XML_XL",             CL_TYPE_XML_XL          },
+    { "CL_TYPE_HWP3",               CL_TYPE_HWP3            },
+    { "CL_TYPE_XML_HWP",            CL_TYPE_XML_HWP         },
+    { "CL_TYPE_HWPOLE2",            CL_TYPE_HWPOLE2         },
+    { "CL_TYPE_OOXML_HWP",          CL_TYPE_OOXML_HWP       },
+    { "CL_TYPE_PS",                 CL_TYPE_PS              },
+    { "CL_TYPE_MHTML",              CL_TYPE_MHTML           },
+    { "CL_TYPE_LNK",                CL_TYPE_LNK             },
+    { "CL_TYPE_EGG",                CL_TYPE_EGG             },
+    { "CL_TYPE_EGGSFX",             CL_TYPE_EGGSFX          },
+    { "CL_TYPE_UDF",                CL_TYPE_UDF             },
+    { "CL_TYPE_ALZ",                CL_TYPE_ALZ             },
+    { "CL_TYPE_ONENOTE",            CL_TYPE_ONENOTE         },
+    { "CL_TYPE_PYTHON_COMPILED",    CL_TYPE_PYTHON_COMPILED },
+    { "CL_TYPE_LHA_LZH",            CL_TYPE_LHA_LZH         },
+    { NULL,                         CL_TYPE_IGNORED         }
 };
 // clang-format on
 
@@ -277,7 +282,8 @@ cli_file_t cli_determine_fmap_type(fmap_t *map, const struct cl_engine *engine, 
     unsigned char buffer[MAGIC_BUFFER_SIZE];
     const unsigned char *buff;
     unsigned char *decoded;
-    int bread, sret;
+    int bread;
+    cli_file_t scan_ret;
     cli_file_t ret = CL_TYPE_BINARY_DATA;
     struct cli_matcher *root;
     struct cli_ac_data mdata;
@@ -299,12 +305,10 @@ cli_file_t cli_determine_fmap_type(fmap_t *map, const struct cl_engine *engine, 
 
     buff = fmap_need_off_once(map, 0, bread);
     if (buff) {
-        sret = cli_memcpy(buffer, buff, bread);
-        if (sret) {
+        if (CL_SUCCESS != cli_memcpy(buffer, buff, bread)) {
             cli_errmsg("cli_determine_fmap_type: fileread error!\n");
             return CL_TYPE_ERROR;
         }
-        sret = 0;
     } else {
         return CL_TYPE_ERROR;
     }
@@ -413,21 +417,28 @@ cli_file_t cli_determine_fmap_type(fmap_t *map, const struct cl_engine *engine, 
         if (cli_ac_initdata(&mdata, root->ac_partsigs, root->ac_lsigs, root->ac_reloff_num, CLI_DEFAULT_AC_TRACKLEN))
             return ret;
 
-        sret = cli_ac_scanbuff(buff, bread, NULL, NULL, NULL, engine->root[0], &mdata, 0, ret, NULL, AC_SCAN_FT, NULL);
+        scan_ret = (cli_file_t)cli_ac_scanbuff(buff, bread, NULL, NULL, NULL, engine->root[0], &mdata, 0, ret, NULL, AC_SCAN_FT, NULL);
 
         cli_ac_freedata(&mdata);
 
-        if (sret >= CL_TYPENO) {
-            ret = sret;
+        if (scan_ret >= CL_TYPENO &&
+            /* Omit SFX archive types selected. We'll detect these in scanraw() */
+            ((scan_ret != CL_TYPE_ZIPSFX) &&
+             (scan_ret != CL_TYPE_ARJSFX) &&
+             (scan_ret != CL_TYPE_RARSFX) &&
+             (scan_ret != CL_TYPE_EGGSFX) &&
+             (scan_ret != CL_TYPE_CABSFX) &&
+             (scan_ret != CL_TYPE_7ZSFX))) {
+            ret = scan_ret;
         } else {
             if (cli_ac_initdata(&mdata, root->ac_partsigs, root->ac_lsigs, root->ac_reloff_num, CLI_DEFAULT_AC_TRACKLEN))
                 return ret;
 
             decoded = (unsigned char *)cli_utf16toascii((char *)buff, bread);
             if (decoded) {
-                sret = cli_ac_scanbuff(decoded, bread / 2, NULL, NULL, NULL, engine->root[0], &mdata, 0, CL_TYPE_TEXT_ASCII, NULL, AC_SCAN_FT, NULL);
+                scan_ret = (cli_file_t)cli_ac_scanbuff(decoded, bread / 2, NULL, NULL, NULL, engine->root[0], &mdata, 0, CL_TYPE_TEXT_ASCII, NULL, AC_SCAN_FT, NULL);
                 free(decoded);
-                if (sret == CL_TYPE_HTML)
+                if (scan_ret == CL_TYPE_HTML)
                     ret = CL_TYPE_HTML_UTF16;
             }
             cli_ac_freedata(&mdata);
@@ -460,8 +471,8 @@ cli_file_t cli_determine_fmap_type(fmap_t *map, const struct cl_engine *engine, 
                             return ret;
 
                         if (out_area.length > 0) {
-                            sret = cli_ac_scanbuff(decodedbuff, out_area.length, NULL, NULL, NULL, engine->root[0], &mdata, 0, 0, NULL, AC_SCAN_FT, NULL); /* FIXME: can we use CL_TYPE_TEXT_ASCII instead of 0? */
-                            if (sret == CL_TYPE_HTML) {
+                            scan_ret = (cli_file_t)cli_ac_scanbuff(decodedbuff, out_area.length, NULL, NULL, NULL, engine->root[0], &mdata, 0, 0, NULL, AC_SCAN_FT, NULL); /* FIXME: can we use CL_TYPE_TEXT_ASCII instead of 0? */
+                            if (scan_ret == CL_TYPE_HTML) {
                                 cli_dbgmsg("cli_determine_fmap_type: detected HTML signature in Unicode file\n");
                                 /* htmlnorm is able to handle any unicode now, since it skips null chars */
                                 ret = CL_TYPE_HTML;
