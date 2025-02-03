@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *  Copyright (C) 2007-2013 Sourcefire, Inc.
  *
  *  Authors: Nigel Horne
@@ -21,6 +21,8 @@
 
 #ifndef __BLOB_H
 #define __BLOB_H
+
+#include "clamav.h"
 
 /*
  * Resizable chunk of memory
@@ -74,7 +76,7 @@ void fileblobPartialSet(fileblob *fb, const char *fullname, const char *arg);
 const char *fileblobGetFilename(const fileblob *fb);
 void fileblobSetCTX(fileblob *fb, cli_ctx *ctx);
 int fileblobAddData(fileblob *fb, const unsigned char *data, size_t len);
-int fileblobScan(const fileblob *fb);
+cl_error_t fileblobScan(const fileblob *fb);
 int fileblobInfected(const fileblob *fb);
 void sanitiseName(char *name);
 

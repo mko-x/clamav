@@ -1,5 +1,5 @@
 
-# Copyright (C) 2019-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+# Copyright (C) 2019-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
 
 if(WIN32)
     cmake_minimum_required( VERSION 3.16 ) # For file(GET_RUNTIME_DEPENDENCIES)
@@ -22,7 +22,7 @@ string(TIMESTAMP TODAY "%Y%m%d")
 set(VERSION_SUFFIX "-devel-${TODAY}")
 
 project( ClamAV
-         VERSION "1.0.0"
+         VERSION "1.5.0"
          DESCRIPTION "ClamAV open source email, web, and end-point anti-virus toolkit." )
 
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
@@ -36,15 +36,15 @@ set(PACKAGE_URL       "https://www.clamav.net/")
 HexVersion(PACKAGE_VERSION_NUM ${PROJECT_VERSION_MAJOR} ${PROJECT_VERSION_MINOR} ${PROJECT_VERSION_PATCH})
 
 # libtool library versioning rules: http://www.gnu.org/software/libtool/manual/html_node/Updating-version-info.html
-set(LIBCLAMAV_CURRENT  10)
-set(LIBCLAMAV_REVISION 0)
-set(LIBCLAMAV_AGE      1)
+set(LIBCLAMAV_CURRENT  12)
+set(LIBCLAMAV_REVISION 3)
+set(LIBCLAMAV_AGE      0)
 
 math(EXPR LIBCLAMAV_SOVERSION "${LIBCLAMAV_CURRENT} - ${LIBCLAMAV_AGE}")
 set(LIBCLAMAV_VERSION "${LIBCLAMAV_SOVERSION}.${LIBCLAMAV_AGE}.${LIBCLAMAV_REVISION}")
 HexVersion(LIBCLAMAV_VERSION_NUM ${LIBCLAMAV_CURRENT} ${LIBCLAMAV_REVISION} ${LIBCLAMAV_AGE})
 
-set(LIBFRESHCLAM_CURRENT  2)
+set(LIBFRESHCLAM_CURRENT  3)
 set(LIBFRESHCLAM_REVISION 2)
 set(LIBFRESHCLAM_AGE      0)
 
@@ -61,6 +61,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(C_LINUX 1)
 elseif(APPLE OR CMAKE_SYSTEM_NAME MATCHES "BSD")
     set(C_BSD 1)
+elseif(CMAKE_SYSTEM_NAME MATCHES "AIX")
+    set(AIX TRUE)
 endif()
 
 # Git optionally used to add commit info into build to differentiate in bug reports.
@@ -76,7 +78,7 @@ if(Git_FOUND)
     endif()
 endif()
 
-# Enable use of pkg-config to find depenencies.
+# Enable use of pkg-config to find dependencies.
 find_package(PkgConfig QUIET)
 
 #
@@ -109,6 +111,19 @@ set(ENABLE_SYSTEMD_DEFAULT          ON)
 
 # See CMakeOptions.cmake for additional options.
 include(CMakeOptions.cmake)
+
+# Set build type to RelWithDebInfo if not specified.
+# This must be done before pulling in the Rust module
+# or else the default build will be Debug for Rust stuffs.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Choose the build type" FORCE)
+
+    # Include "None" as option to disable any additional (optimization) flags,
+    # relying on just CMAKE_C_FLAGS and CMAKE_CXX_FLAGS (which are empty by
+    # default). These strings are presented in cmake-gui.
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+        "None" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+endif()
 
 #
 # Find Build Tools
@@ -161,20 +176,28 @@ endif()
 #
 # Set RPATH for custom install prefixes
 #
-if(APPLE)
+if(APPLE AND NOT DO_NOT_SET_RPATH)
     set(CMAKE_MACOSX_RPATH 1)
 endif()
 
 include(GNUInstallDirs)
 
-if(CMAKE_INSTALL_FULL_LIBDIR)
-    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_FULL_LIBDIR}")
+if (NOT DEFINED CMAKE_INSTALL_RPATH AND NOT DO_NOT_SET_RPATH)
+    if(CMAKE_INSTALL_FULL_LIBDIR)
+        set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_FULL_LIBDIR}")
+    else()
+        set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
+    endif()
+endif()
+
+if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+  set(USING_CLANG ON)
 else()
-    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
+  set(USING_CLANG OFF)
 endif()
 
 if(C_LINUX)
-    if(CMAKE_COMPILER_IS_GNUCXX)
+    if(CMAKE_COMPILER_IS_GNUCXX OR USING_CLANG)
         # Set _GNU_SOURCE for O_LARGEFILE, O_CLOEXEC, O_DIRECTORY, O_NOFOLLOW, etc flags on older systems
         # (pre POSIX.1-2008: glibc 2.11 and earlier). #4042
         set(_GNU_SOURCE 1)
@@ -202,20 +225,26 @@ if(ENABLE_TESTS)
     find_package(Libcheck REQUIRED)
 
     # Used to generate the test files and for the application feature test framework
-    find_package(Python3 REQUIRED)
-
-    # First try using pytest from the PATH
-    execute_process(
-        COMMAND pytest --version
-        RESULT_VARIABLE PYTEST_EXIT_CODE
-        ERROR_QUIET OUTPUT_QUIET
-    )
-
-    if(${PYTEST_EXIT_CODE} EQUAL 0)
-        # pytest found in the path.
-        set(PythonTest_COMMAND "pytest;-v")
+    # In distros that support multiple implementations of python it is helpful to specify the impl to use
+    if(DEFINED PYTHON_FIND_VERSION)
+        find_package(Python3 EXACT ${PYTHON_FIND_VERSION} REQUIRED)
     else()
-        # Not in the path, try using: python3 -m pytest
+        find_package(Python3 REQUIRED)
+        # Not requesting a specific python impl; try using pytest from the PATH
+        execute_process(
+            COMMAND pytest --version
+            RESULT_VARIABLE PYTEST_EXIT_CODE
+            ERROR_QUIET OUTPUT_QUIET
+        )
+
+        if(${PYTEST_EXIT_CODE} EQUAL 0)
+            # pytest found in the path.
+            set(PythonTest_COMMAND "pytest;-v")
+        endif()
+    endif()
+
+    if("${PythonTest_COMMAND}" STREQUAL "")
+        # Not in the path or specified a python impl; try using: python3 -m pytest
         execute_process(
             COMMAND ${Python3_EXECUTABLE} -m pytest --version
             RESULT_VARIABLE PYTEST_MODULE_EXIT_CODE
@@ -244,7 +273,7 @@ if(ENABLE_TESTS)
                 # No unittest either!
                 # Some weird Python installations do exist that lack standard modules like unittest.
                 # Let's make sure these folks know the Python 3 install we found won't cut it.
-                message("Python 3 found: ${Python3_EXECUTABLE}, but it is missing the unittest module (wierd!).")
+                message("Python 3 found: ${Python3_EXECUTABLE}, but it is missing the unittest module (weird!).")
                 message(FATAL_ERROR "The tests won't work with this Python installation. You can disable the tests by reconfiguring with: -D ENABLE_TESTS=OFF")
             endif()
         endif()
@@ -318,7 +347,7 @@ if (WIN32)
     NumberToHex(${PROJECT_VERSION_MINOR} HEX_MINOR)
     NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
     SET(CPACK_WIX_PRODUCT_GUID           "D9F136C1-3691-47E3-9079-4FE9C9${HEX_MAJOR}${HEX_MINOR}${HEX_PATCH}")
-    SET(CPACK_WIX_UPGRADE_GUID           "D9F136C1-3691-47E3-9079-4FE9C9${HEX_MAJOR}${HEX_MINOR}00")
+    SET(CPACK_WIX_UPGRADE_GUID           "D9F136C1-3691-47E3-9079-4FE9C9${HEX_MAJOR}0000")
 
     SET(CPACK_WIX_PRODUCT_ICON           ${CMAKE_CURRENT_SOURCE_DIR}/win32/res/clam.ico)
     SET(CPACK_WIX_UI_BANNER              ${CMAKE_CURRENT_SOURCE_DIR}/win32/wix_ui_banner.bmp)
@@ -370,8 +399,6 @@ elseif(APPLE)
         )
         if(${MARKDOWN_MODULE_EXIT_CODE} EQUAL 0)
             # The markdown module is installed, we can do the conversion.
-            set(PythonTest_COMMAND "${Python3_EXECUTABLE};-m;markdown;-v")
-
             execute_process(
                 COMMAND echo "<html><body>"
                 OUTPUT_FILE ${CMAKE_CURRENT_BINARY_DIR}/prefix.html)
@@ -431,20 +458,10 @@ include(CPack)
 
 # libclamav efficacy dependencies
 find_package(OpenSSL REQUIRED)
-if(OPENSSL_FOUND)
-    set(HAVE_LIBSSL 1)
-endif()
 
 find_package(ZLIB REQUIRED)
-if(ZLIB_FOUND)
-    set(HAVE_ZLIB_H 1)
-    set(HAVE_LIBZ 1)
-endif()
 
 find_package(BZip2 REQUIRED)
-if(BZIP2_FOUND)
-    set(HAVE_BZLIB_H 1)
-endif()
 
 # Disable CMAKE_FIND_PACKAGE_PREFER_CONFIG, temporarily, because
 # we don't presently support the using libxml2's Config.cmake
@@ -452,17 +469,11 @@ set(PACKAGE_PREFER_CONFIG_BAK ${CMAKE_FIND_PACKAGE_PREFER_CONFIG})
 set(CMAKE_FIND_PACKAGE_PREFER_CONFIG FALSE)
 
 find_package(LibXml2 REQUIRED)
-if(LibXml2_FOUND)
-    set(HAVE_LIBXML2 1)
-endif()
+
 # Restore the requested CMAKE_FIND_PACKAGE_PREFER_CONFIG setting
 set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ${PACKAGE_PREFER_CONFIG_BAK})
 
 find_package(PCRE2 REQUIRED)
-if(PCRE2_FOUND)
-    set(HAVE_PCRE 1)
-    set(USING_PCRE2 1)
-endif()
 
 # libclamav feature dependencies
 if(NOT WIN32)
@@ -477,59 +488,64 @@ else()
     set(JSONC_USE_STATIC ON)
 endif()
 find_package(JSONC REQUIRED)
-# Set variable required by libclamav to use libjson-c
-set(HAVE_JSON 1)
+
+set(LLVM_MAX_VER "13")
+set(LLVM_MIN_VER "8")
 
 string (TOLOWER ${BYTECODE_RUNTIME} bytecodeRuntime)
 if(${bytecodeRuntime} STREQUAL "llvm")
-    set (LLVM_FIND_VERSION "8.0.0")
-    find_package(LLVM REQUIRED)
+    if(DEFINED LLVM_ROOT_DIR AND DEFINED LLVM_FIND_VERSION)
+        find_package(LLVM EXACT ${LLVM_FIND_VERSION} REQUIRED HINTS ${LLVM_ROOT_DIR})
+    elseif(DEFINED LLVM_ROOT_DIR)
+        find_package(LLVM REQUIRED HINTS ${LLVM_ROOT_DIR})
+    elseif(DEFINED LLVM_FIND_VERSION)
+        find_package(LLVM EXACT ${LLVM_FIND_VERSION} REQUIRED)
+    else()
+        set (LLVM_FIND_VERSION ${LLVM_MIN_VER})
+        find_package(LLVM REQUIRED)
+    endif()
     if(LLVM_FOUND)
         if (LLVM_AVAILABLE_LIBS)
-            # Found using LLVMConfig.cmake
-            message("LLVM found using LLVMConfig.cmake")
-            set(LLVM_VERSION ${LLVM_VERSION_MAJOR}${LLVM_VERSION_MINOR})
+            message(STATUS "LLVM found using LLVMConfig.cmake")
             set(LLVM_LIBRARIES ${LLVM_AVAILABLE_LIBS})
-
-            if (${LLVM_PACKAGE_VERSION} VERSION_LESS "8.0.0")
-                message(FATAL "LLVM version ${LLVM_PACKAGE_VERSION} is too old")
-            endif()
-
         else()
-            # Found using FindLLVM.cmake
-            message("LLVM found using FindLLVM.cmake")
+            message(STATUS "LLVM found using FindLLVM.cmake")
+            set(LLVM_PACKAGE_VERSION ${LLVM_VERSION_STRING})
 
-            # Set variable required by libclamav to use llvm instead of interpreter
-            set(LLVM_VERSION ${LLVM_VERSION_MAJOR}${LLVM_VERSION_MINOR})
-            message("LLVM_FOUND ${LLVM_FOUND}")
-
-            if (${LLVM_VERSION_STRING} VERSION_GREATER_EQUAL "9.0.0")
-                if (${LLVM_VERSION_STRING} VERSION_LESS "10.0.0")
-                    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNDEBUG")
-                endif()
-            endif()
-
-            if (${LLVM_VERSION_STRING} VERSION_LESS "8.0.0")
-                message(FATAL "LLVM version ${LLVM_VERSION_STRING} is too old")
+            if (${LLVM_VERSION_STRING} VERSION_GREATER_EQUAL "9.0.0" AND ${LLVM_VERSION_STRING} VERSION_LESS "10.0.0")
+                set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNDEBUG")
             endif()
         endif()
+
+        math(EXPR TOO_HIGH_VERSION "${LLVM_MAX_VER} + 1" OUTPUT_FORMAT DECIMAL)
+
+        if(${LLVM_PACKAGE_VERSION} VERSION_LESS ${LLVM_MIN_VER})
+            message(FATAL_ERROR "LLVM version ${LLVM_PACKAGE_VERSION} is too old")
+        elseif (${LLVM_PACKAGE_VERSION} VERSION_GREATER_EQUAL ${TOO_HIGH_VERSION} )
+            message(FATAL_ERROR "LLVM version ${LLVM_PACKAGE_VERSION} is too new")
+        else()
+            message(STATUS "LLVM version ${LLVM_PACKAGE_VERSION} found")
+        endif()
+
+        # Set variable required by libclamav to use llvm instead of interpreter
+        set(LLVM_VERSION ${LLVM_VERSION_MAJOR}${LLVM_VERSION_MINOR})
+    endif()
+endif()
+
+if(APPLE)
+    find_library(APPLE_CORE_FOUNDATION CoreFoundation)
+    if (NOT APPLE_CORE_FOUNDATION)
+        message(FATAL_ERROR "Apple CoreFoundation framework not found")
+    endif()
+    find_library(APPLE_SECURITY Security)
+    if (NOT APPLE_SECURITY)
+        message(FATAL_ERROR "Apple Security framework not found")
     endif()
 endif()
 
 # libfreshclam & application dependencies
 if(NOT ENABLE_LIBCLAMAV_ONLY)
     find_package(CURL REQUIRED)
-
-    if(APPLE)
-        find_library(APPLE_CORE_FOUNDATION CoreFoundation)
-        if (NOT APPLE_CORE_FOUNDATION)
-            message(FATAL_ERROR "Apple CoreFoundation framework not found")
-        endif()
-        find_library(APPLE_SECURITY Security)
-        if (NOT APPLE_SECURITY)
-            message(FATAL_ERROR "Apple Security framework not found")
-        endif()
-    endif()
 
     if(ENABLE_APP)
         find_package(CURSES REQUIRED)
@@ -578,18 +594,10 @@ foreach(_cxx1x_flag -std=c++14 -std=c++11)
     endif()
 endforeach()
 
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Choose the build type" FORCE)
-
-    # Include "None" as option to disable any additional (optimization) flags,
-    # relying on just CMAKE_C_FLAGS and CMAKE_CXX_FLAGS (which are empty by
-    # default). These strings are presented in cmake-gui.
-    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
-        "None" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+# Always use '-fPIC'/'-fPIE' option if OS is not Haiku.
+if(NOT HAIKU)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
-
-# Always use '-fPIC'/'-fPIE' option.
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Checks for header files.
 include(CheckIncludeFile)
@@ -660,13 +668,13 @@ check_type_size("ssize_t" SIZEOF_SSIZE_T)
 if(SIZEOF_SSIZE_T STREQUAL "")
     # ssize_t is a signed type in POSIX storing at least -1.
     # Set it to "int" to match the behavior of AC_TYPE_SSIZE_T (autotools).
-    set(ssize_t int)
+    set(SSIZE_T_DEF "typedef int ssize_t;")
 endif()
 check_type_size("off_t" SIZEOF_OFF_T)
 if(SIZEOF_OFF_T STREQUAL "")
     # off_t is a signed type in POSIX no narrower than int.
     # Set it to "long int" to match the behavior of AC_TYPE_OFF_T (autotools).
-    set(off_t long int)
+    set(OFF_T_DEF "typedef long int off_t;")
 endif()
 
 check_type_size("int" SIZEOF_INT)
@@ -891,6 +899,7 @@ else()
     extract_valid_cxx_flags(WARNCXXFLAGS
         -Wall
         -Wformat-security
+        -Wno-comment                      # Disabled because LLVM's CFG.h has a warning about a multiline comment because of ascii-art of a graph with a `\` in it.
     )
 endif()
 
@@ -967,7 +976,7 @@ if(WIN32)
     set(CLAMAV_RES "")
     configure_file(
         win32/res/common.rc.in
-        ${CMAKE_BINARY_DIR}/version.rc
+        ${CMAKE_SOURCE_DIR}/win32/res/common.rc
         @ONLY)
 else()
     #
@@ -1021,15 +1030,6 @@ if(NOT ENABLE_EXTERNAL_MSPACK)
 else()
     find_package(MSPack REQUIRED)
     set(LIBMSPACK "MSPack::mspack")
-endif()
-
-if(NOT ENABLE_EXTERNAL_TOMSFASTMATH)
-    # TomsFastMath built as an object library within libclamav, at least for now.
-    set(LIBTFM "tomsfastmath")
-else()
-    find_package(TomsFastMath REQUIRED)
-    set(HAVE_SYSTEM_TOMSFASTMATH 1)
-    set(LIBTFM "TomsFastMath::TomsFastMath")
 endif()
 
 if(WIN32)

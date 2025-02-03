@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *  Copyright (C) 2010-2013 Sourcefire, Inc.
  *
  *  Authors: aCaB <acab@clamav.net>
@@ -122,8 +122,10 @@ int cli_binhex(cli_ctx *ctx)
                         ret = CL_ESEEK;
                         break;
                     }
-                    ret = cli_magic_scan_desc(datafd, dname, ctx, NULL);
-                    if (ret == CL_VIRUS) break;
+                    ret = cli_magic_scan_desc(datafd, dname, ctx, NULL, LAYER_ATTRIBUTES_NONE);
+                    if (ret != CL_SUCCESS) {
+                        break;
+                    }
                 }
                 if (dec_done)
                     memmove(decoded, &decoded[todo], dec_done);
@@ -168,7 +170,7 @@ int cli_binhex(cli_ctx *ctx)
                         ret = CL_ESEEK;
                         break;
                     }
-                    ret = cli_magic_scan_desc(resfd, rname, ctx, NULL);
+                    ret = cli_magic_scan_desc(resfd, rname, ctx, NULL, LAYER_ATTRIBUTES_NONE);
                     break;
                 }
             }
@@ -180,7 +182,7 @@ int cli_binhex(cli_ctx *ctx)
                         ret = CL_ESEEK;
                         break;
                     }
-                    ret = cli_magic_scan_desc(datafd, dname, ctx, NULL);
+                    ret = cli_magic_scan_desc(datafd, dname, ctx, NULL, LAYER_ATTRIBUTES_NONE);
                 } else if (write_phase == IN_RES) {
                     cli_dbgmsg("cli_binhex: scanning partially extracted resource fork\n");
                     if (lseek(resfd, 0, SEEK_SET) == -1) {
@@ -188,7 +190,7 @@ int cli_binhex(cli_ctx *ctx)
                         ret = CL_ESEEK;
                         break;
                     }
-                    ret = cli_magic_scan_desc(resfd, rname, ctx, NULL);
+                    ret = cli_magic_scan_desc(resfd, rname, ctx, NULL, LAYER_ATTRIBUTES_NONE);
                 }
                 break;
             }

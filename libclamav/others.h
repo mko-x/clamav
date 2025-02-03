@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *  Copyright (C) 2007-2013 Sourcefire, Inc.
  *
  *  Authors: Tomasz Kojm
@@ -40,9 +40,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
-#ifdef HAVE_JSON
 #include <json.h>
-#endif
 
 #include "clamav.h"
 #include "dconf.h"
@@ -60,9 +58,7 @@
 #include "yara_clam.h"
 #endif
 
-#if HAVE_LIBXML2
 #define CLAMAV_MIN_XMLREADER_FLAGS (XML_PARSE_NOERROR | XML_PARSE_NONET)
-#endif
 
 /*
  * CL_FLEVEL is the signature f-level specific to the current code and
@@ -73,7 +69,7 @@
  * in re-enabling affected modules.
  */
 
-#define CL_FLEVEL 160
+#define CL_FLEVEL 220
 #define CL_FLEVEL_DCONF CL_FLEVEL
 #define CL_FLEVEL_SIGTOOL CL_FLEVEL
 
@@ -146,7 +142,7 @@ extern uint8_t cli_always_gen_section_hash;
      (size_t)(sb) + (size_t)(sb_size) <= (size_t)(bb_size) && \
      (size_t)(sb) <= (size_t)(bb_size))
 
-#define CLI_MAX_ALLOCATION (182 * 1024 * 1024)
+#define CLI_MAX_ALLOCATION (1024 * 1024 * 1024)
 
 #ifdef HAVE_SYS_PARAM_H
 #include <sys/param.h> /* for NAME_MAX */
@@ -185,30 +181,31 @@ typedef struct recursion_level_tag {
     cl_fmap_t *fmap;                      /* The fmap for this layer. This used to be in an array in the ctx. */
     uint32_t recursion_level_buffer;      /* Which buffer layer in scan recursion. */
     uint32_t recursion_level_buffer_fmap; /* Which fmap layer in this buffer. */
-    bool is_normalized_layer;             /* Indicates that the layer should be skipped when checking container and intermediate types. */
+    uint32_t attributes;                  /* layer attributes. */
     image_fuzzy_hash_t image_fuzzy_hash;  /* Used for image/graphics files to store a fuzzy hash. */
+    bool calculated_image_fuzzy_hash;     /* Used for image/graphics files to store a fuzzy hash. */
 } recursion_level_t;
+
+typedef void *evidence_t;
+typedef void *onedump_t;
 
 /* internal clamav context */
 typedef struct cli_ctx_tag {
-    char *target_filepath;    /**< (optional) The filepath of the original scan target. */
-    const char *sub_filepath; /**< (optional) The filepath of the current file being parsed. May be a temp file. */
-    char *sub_tmpdir;         /**< The directory to store tmp files at this recursion depth. */
-    const char **virname;
-    unsigned int num_viruses;
+    char *target_filepath;    /* (optional) The filepath of the original scan target. */
+    const char *sub_filepath; /* (optional) The filepath of the current file being parsed. May be a temp file. */
+    char *sub_tmpdir;         /* The directory to store tmp files at this recursion depth. */
+    evidence_t evidence;      /* Stores the evidence for this scan to alert (alerting indicators). */
     unsigned long int *scanned;
     const struct cli_matcher *root;
     const struct cl_engine *engine;
     uint64_t scansize;
     struct cl_scan_options *options;
     unsigned int scannedfiles;
-    unsigned int found_possibly_unwanted;
-    unsigned int corrupted_input;
+    unsigned int corrupted_input;       /* Setting this flag will prevent the PE parser from reporting "broken executable" for unpacked/reconstructed files that may not be 100% to spec. */
     recursion_level_t *recursion_stack; /* Array of recursion levels used as a stack. */
     uint32_t recursion_stack_size;      /* stack size must == engine->max_recursion_level */
     uint32_t recursion_level;           /* Index into recursion_stack; current fmap recursion level from start of scan. */
     fmap_t *fmap;                       /* Pointer to current fmap in recursion_stack, varies with recursion depth. For convenience. */
-    bool next_layer_is_normalized;      /* Indicate that the next fmap pushed to the stack is normalized and should be ignored when checking container/intermediate types */
     unsigned char handlertype_hash[16];
     struct cli_dconf *dconf;
     bitset_t *hook_lsig_matches;
@@ -217,10 +214,8 @@ typedef struct cli_ctx_tag {
 #ifdef HAVE__INTERNAL__SHA_COLLECT
     int sha_collect;
 #endif
-#ifdef HAVE_JSON
     struct json_object *properties;
     struct json_object *wrkproperty;
-#endif
     struct timeval time_limit;
     bool limit_exceeded; /* To guard against alerting on limits exceeded more than once, or storing that in the JSON metadata more than once. */
     bool abort_scan;     /* So we can guarantee a scan is aborted, even if CL_ETIMEOUT/etc. status is lost in the scan recursion stack. */
@@ -327,6 +322,7 @@ struct cl_engine {
     char *tmpdir;
     uint32_t keeptmp;
     uint64_t engine_options;
+    uint32_t cache_size;
 
     /* Limits */
     uint32_t maxscantime;         /* Time limit (in milliseconds) */
@@ -407,6 +403,7 @@ struct cl_engine {
     crtmgr cmgr;
 
     /* Callback(s) */
+    clcb_file_inspection cb_file_inspection;
     clcb_pre_cache cb_pre_cache;
     clcb_pre_scan cb_pre_scan;
     clcb_post_scan cb_post_scan;
@@ -415,6 +412,7 @@ struct cl_engine {
     void *cb_sigload_ctx;
     clcb_hash cb_hash;
     clcb_meta cb_meta;
+    clcb_generic_data cb_vba;
     clcb_file_props cb_file_props;
     clcb_progress cb_sigload_progress;
     void *cb_sigload_progress_ctx;
@@ -490,6 +488,7 @@ struct cl_settings {
     enum bytecode_mode bytecode_mode;
     char *pua_cats;
     uint64_t engine_options;
+    uint32_t cache_size;
 
     /* callbacks */
     clcb_pre_cache cb_pre_cache;
@@ -553,6 +552,7 @@ extern LIBCLAMAV_EXPORT int have_rar;
 #define SCAN_HEURISTICS (ctx->options->general & CL_SCAN_GENERAL_HEURISTICS)
 #define SCAN_HEURISTIC_PRECEDENCE (ctx->options->general & CL_SCAN_GENERAL_HEURISTIC_PRECEDENCE)
 #define SCAN_UNPRIVILEGED (ctx->options->general & CL_SCAN_GENERAL_UNPRIVILEGED)
+#define SCAN_STORE_HTML_URLS (ctx->options->general & CL_SCAN_GENERAL_STORE_HTML_URLS)
 
 #define SCAN_PARSE_ARCHIVE (ctx->options->parse & CL_SCAN_PARSE_ARCHIVE)
 #define SCAN_PARSE_ELF (ctx->options->parse & CL_SCAN_PARSE_ELF)
@@ -564,6 +564,9 @@ extern LIBCLAMAV_EXPORT int have_rar;
 #define SCAN_PARSE_OLE2 (ctx->options->parse & CL_SCAN_PARSE_OLE2)
 #define SCAN_PARSE_HTML (ctx->options->parse & CL_SCAN_PARSE_HTML)
 #define SCAN_PARSE_PE (ctx->options->parse & CL_SCAN_PARSE_PE)
+#define SCAN_PARSE_ONENOTE (ctx->options->parse & CL_SCAN_PARSE_ONENOTE)
+#define SCAN_PARSE_IMAGE (ctx->options->parse & CL_SCAN_PARSE_IMAGE)
+#define SCAN_PARSE_IMAGE_FUZZY_HASH (ctx->options->parse & CL_SCAN_PARSE_IMAGE_FUZZY_HASH)
 
 #define SCAN_HEURISTIC_BROKEN (ctx->options->heuristic & CL_SCAN_HEURISTIC_BROKEN)
 #define SCAN_HEURISTIC_BROKEN_MEDIA (ctx->options->heuristic & CL_SCAN_HEURISTIC_BROKEN_MEDIA)
@@ -729,11 +732,23 @@ cl_error_t cli_append_virus(cli_ctx *ctx, const char *virname);
  * @param virname   The alert name.
  * @return cl_error_t CL_VIRUS if scan should be halted due to an alert, CL_CLEAN if scan should continue.
  */
-cl_error_t cli_append_possibly_unwanted(cli_ctx *ctx, const char *virname);
+cl_error_t cli_append_potentially_unwanted(cli_ctx *ctx, const char *virname);
+
+/**
+ * @brief If the SCAN_HEURISTIC_EXCEEDS_MAX option is enabled, append a "potentially unwanted" indicator.
+ *
+ * There is no return value because the caller should select the appropriate "CL_EMAX*" error code regardless
+ * of whether or not an FP sig is found, or allmatch is enabled, or whatever.
+ * That is, the scan must not continue because of an FP sig.
+ *
+ * @param ctx       The scan context.
+ * @param virname   The name of the potentially unwanted indicator.
+ */
+void cli_append_potentially_unwanted_if_heur_exceedsmax(cli_ctx *ctx, char *virname);
 
 const char *cli_get_last_virus(const cli_ctx *ctx);
 const char *cli_get_last_virus_str(const cli_ctx *ctx);
-void cli_virus_found_cb(cli_ctx *ctx);
+void cli_virus_found_cb(cli_ctx *ctx, const char *virname);
 
 /**
  * @brief Push a new fmap onto our scan recursion stack.
@@ -744,9 +759,10 @@ void cli_virus_found_cb(cli_ctx *ctx);
  * @param map           The fmap for the new layer.
  * @param type          The file type. May be CL_TYPE_ANY if unknown. Can change it later with cli_recursion_stack_change_type().
  * @param is_new_buffer true if the fmap represents a new buffer/file, and not some window into an existing fmap.
+ * @param attributes    Layer attributes for the thing to be scanned.
  * @return cl_error_t   CL_SUCCESS if successful, else CL_EMAXREC if exceeding the max recursion depth.
  */
-cl_error_t cli_recursion_stack_push(cli_ctx *ctx, cl_fmap_t *map, cli_file_t type, bool is_new_buffer);
+cl_error_t cli_recursion_stack_push(cli_ctx *ctx, cl_fmap_t *map, cli_file_t type, bool is_new_buffer, uint32_t attributes);
 
 /**
  * @brief Pop off a layer of our scan recursion stack.
@@ -917,13 +933,34 @@ static inline int cli_getpagesize(void)
 #endif /* HAVE_SYSCONF_SC_PAGESIZE */
 #endif /* _WIN32 */
 
-void *cli_malloc(size_t nmemb);
-void *cli_calloc(size_t nmemb, size_t size);
+/**
+ * @brief Wrapper around malloc that limits how much may be allocated to CLI_MAX_ALLOCATION.
+ *
+ * Please use CLI_MAX_MALLOC_OR_GOTO_DONE() with `goto done;` error handling instead.
+ *
+ * @param ptr
+ * @param size
+ * @return void*
+ */
+void *cli_max_malloc(size_t nmemb);
+
+/**
+ * @brief Wrapper around calloc that limits how much may be allocated to CLI_MAX_ALLOCATION.
+ *
+ * Please use CLI_MAX_CALLOC_OR_GOTO_DONE() with `goto done;` error handling instead.
+ *
+ * @param ptr
+ * @param size
+ * @return void*
+ */
+void *cli_max_calloc(size_t nmemb, size_t size);
 
 /**
  * @brief Wrapper around realloc that limits how much may be allocated to CLI_MAX_ALLOCATION.
  *
- * Please use CLI_REALLOC() with `goto done;` error handling instead.
+ * Please use CLI_MAX_REALLOC_OR_GOTO_DONE() with `goto done;` error handling instead.
+ *
+ * NOTE: cli_max_realloc() will NOT free ptr if size==0. It is safe to free ptr after `done:`.
  *
  * IMPORTANT: This differs from realloc() in that if size==0, it will NOT free the ptr.
  *
@@ -931,29 +968,75 @@ void *cli_calloc(size_t nmemb, size_t size);
  * @param size
  * @return void*
  */
-void *cli_realloc(void *ptr, size_t size);
+void *cli_max_realloc(void *ptr, size_t size);
 
 /**
  * @brief Wrapper around realloc that limits how much may be allocated to CLI_MAX_ALLOCATION.
  *
- * Please use CLI_REALLOC() with `goto done;` error handling instead.
+ * Please use CLI_MAX_REALLOC_OR_GOTO_DONE() with `goto done;` error handling instead.
  *
  * IMPORTANT: This differs from realloc() in that if size==0, it will NOT free the ptr.
  *
- * WARNING: This differs from cli_realloc() in that it will free the ptr if the allocation fails.
+ * WARNING: This differs from cli_max_realloc() in that it will free the ptr if the allocation fails.
  * If you're using `goto done;` error handling, this may result in a double-free!!
  *
  * @param ptr
  * @param size
  * @return void*
  */
-void *cli_realloc2(void *ptr, size_t size);
+void *cli_max_realloc_or_free(void *ptr, size_t size);
 
-char *cli_strdup(const char *s);
+/**
+ * @brief Wrapper around realloc that, unlike some variants of realloc, will not free the ptr if size==0.
+ *
+ * Please use CLI_MAX_REALLOC_OR_GOTO_DONE() with `goto done;` error handling instead.
+ *
+ * IMPORTANT: This differs from realloc() in that if size==0, it will NOT free the ptr.
+ *
+ * @param ptr
+ * @param size
+ * @return void*
+ */
+void *cli_safer_realloc(void *ptr, size_t size);
+
+/**
+ * @brief Wrapper around realloc that, unlike some variants of realloc, will not free the ptr if size==0.
+ *
+ * Please use CLI_SAFER_REALLOC_OR_GOTO_DONE() with `goto done;` error handling instead.
+ *
+ * IMPORTANT: This differs from realloc() in that if size==0, it will NOT free the ptr.
+ *
+ * WARNING: This differs from cli_safer_realloc() in that it will free the ptr if the allocation fails.
+ * If you're using `goto done;` error handling, this may result in a double-free!!
+ *
+ * @param ptr
+ * @param size
+ * @return void*
+ */
+void *cli_safer_realloc_or_free(void *ptr, size_t size);
+
+/**
+ * @brief Wrapper around strdup that does a NULL check.
+ *
+ * Please use CLI_STRDUP_OR_GOTO_DONE() with `goto done;` error handling instead.
+ *
+ * @param s
+ * @return char* Returns the allocated string or NULL if allocation failed. This includes if allocation fails because s==NULL.
+ */
+char *cli_safer_strdup(const char *s);
+
 int cli_rmdirs(const char *dirname);
 char *cli_hashstream(FILE *fs, unsigned char *digcpy, int type);
 char *cli_hashfile(const char *filename, int type);
-int cli_unlink(const char *pathname);
+
+/**
+ * @brief unlink() with error checking
+ *
+ * @param pathname the file path to unlink
+ * @return cl_error_t CL_SUCCESS if successful, CL_EUNLINK if unlink() failed
+ */
+cl_error_t cli_unlink(const char *pathname);
+
 size_t cli_readn(int fd, void *buff, size_t count);
 size_t cli_writen(int fd, const void *buff, size_t count);
 const char *cli_gettmpdir(void);
@@ -962,7 +1045,7 @@ const char *cli_gettmpdir(void);
  * @brief Sanitize a relative path, so it cannot have a negative depth.
  *
  * Caller is responsible for freeing the sanitized filepath.
- * The optioal sanitized_filebase output param is a pointer into the filepath,
+ * The optional sanitized_filebase output param is a pointer into the filepath,
  * if set, and does not need to be freed.
  *
  * @param filepath                  The filepath to sanitize
@@ -1054,8 +1137,8 @@ void cli_bitset_free(bitset_t *bs);
 int cli_bitset_set(bitset_t *bs, unsigned long bit_offset);
 int cli_bitset_test(bitset_t *bs, unsigned long bit_offset);
 const char *cli_ctime(const time_t *timep, char *buf, const size_t bufsize);
-void cli_append_virus_if_heur_exceedsmax(cli_ctx *, char *);
-cl_error_t cli_checklimits(const char *, cli_ctx *, unsigned long, unsigned long, unsigned long);
+
+cl_error_t cli_checklimits(const char *who, cli_ctx *ctx, uint64_t need1, uint64_t need2, uint64_t need3);
 
 /**
  * @brief Call before scanning a file to determine if we should scan it, skip it, or abort the entire scanning process.
@@ -1069,7 +1152,6 @@ cl_error_t cli_checklimits(const char *, cli_ctx *, unsigned long, unsigned long
  */
 cl_error_t cli_updatelimits(cli_ctx *ctx, size_t needed);
 
-unsigned long cli_getsizelimit(cli_ctx *, unsigned long);
 int cli_matchregex(const char *str, const char *regex);
 void cli_qsort(void *a, size_t n, size_t es, int (*cmp)(const void *, const void *));
 void cli_qsort_r(void *a, size_t n, size_t es, int (*cmp)(const void *, const void *, const void *), void *arg);
@@ -1202,7 +1284,7 @@ cl_error_t cli_realpath(const char *file_name, char **real_filename);
  * This is required for unit tests to be able to link with clamav.dll and not
  * directly manipulate libclamav global variables.
  */
-uint8_t cli_get_debug_flag();
+uint8_t cli_get_debug_flag(void);
 
 /**
  * @brief   Set the libclamav debug flag to a specific value.
@@ -1214,103 +1296,150 @@ uint8_t cli_get_debug_flag();
  */
 uint8_t cli_set_debug_flag(uint8_t debug_flag);
 
-#ifndef STRDUP
-#define STRDUP(buf, var, ...) \
-    do {                      \
-        var = strdup(buf);    \
-        if (NULL == var) {    \
-            do {              \
-                __VA_ARGS__;  \
-            } while (0);      \
-            goto done;        \
-        }                     \
+#ifndef CLI_SAFER_STRDUP_OR_GOTO_DONE
+/**
+ * @brief Wrapper around strdup that does a NULL check.
+ *
+ * This macro requires `goto done;` error handling.
+ *
+ * @param buf   The string to duplicate.
+ * @param var   The variable to assign the allocated string to.
+ * @param ...   The error handling code to execute if the allocation fails.
+ */
+#define CLI_SAFER_STRDUP_OR_GOTO_DONE(buf, var, ...) \
+    do {                                             \
+        var = cli_safer_strdup(buf);                 \
+        if (NULL == var) {                           \
+            do {                                     \
+                __VA_ARGS__;                         \
+            } while (0);                             \
+            goto done;                               \
+        }                                            \
     } while (0)
 #endif
 
-#ifndef CLI_STRDUP
-#define CLI_STRDUP(buf, var, ...) \
-    do {                          \
-        var = cli_strdup(buf);    \
-        if (NULL == var) {        \
-            do {                  \
-                __VA_ARGS__;      \
-            } while (0);          \
-            goto done;            \
-        }                         \
-    } while (0)
-#endif
-
-#ifndef FREE
-#define FREE(var)          \
-    do {                   \
-        if (NULL != var) { \
-            free(var);     \
-            var = NULL;    \
-        }                  \
-    } while (0)
-#endif
-
-#ifndef MALLOC
-#define MALLOC(var, size, ...) \
-    do {                       \
-        var = malloc(size);    \
-        if (NULL == var) {     \
-            do {               \
-                __VA_ARGS__;   \
-            } while (0);       \
-            goto done;         \
-        }                      \
-    } while (0)
-#endif
-
-#ifndef CLI_MALLOC
-#define CLI_MALLOC(var, size, ...) \
+#ifndef CLI_FREE_AND_SET_NULL
+/**
+ * @brief Wrapper around `free()` to ensure you reset the variable to NULL so as to prevent a double-free.
+ *
+ * @param var The variable to free and set to NULL.
+ */
+#define CLI_FREE_AND_SET_NULL(var) \
     do {                           \
-        var = cli_malloc(size);    \
-        if (NULL == var) {         \
-            do {                   \
-                __VA_ARGS__;       \
-            } while (0);           \
-            goto done;             \
+        if (NULL != var) {         \
+            free((void *)var);     \
+            var = NULL;            \
         }                          \
     } while (0)
 #endif
 
-#ifndef CALLOC
-#define CALLOC(var, nmemb, size, ...) \
-    do {                              \
-        (var) = calloc(nmemb, size);  \
-        if (NULL == var) {            \
-            do {                      \
-                __VA_ARGS__;          \
-            } while (0);              \
-            goto done;                \
-        }                             \
+#ifndef CLI_MALLOC_OR_GOTO_DONE
+/**
+ * @brief Wrapper around malloc that will `goto done;` if the allocation fails.
+ *
+ * This macro requires `goto done;` error handling.
+ *
+ * @param ptr   The variable to assign the allocated memory to.
+ * @param size  The size of the memory to allocate.
+ * @param ...   The error handling code to execute if the allocation fails.
+ */
+#define CLI_MALLOC_OR_GOTO_DONE(var, size, ...) \
+    do {                                        \
+        var = malloc(size);                     \
+        if (NULL == var) {                      \
+            do {                                \
+                __VA_ARGS__;                    \
+            } while (0);                        \
+            goto done;                          \
+        }                                       \
     } while (0)
 #endif
 
-#ifndef CLI_CALLOC
-#define CLI_CALLOC(var, nmemb, size, ...) \
-    do {                                  \
-        (var) = cli_calloc(nmemb, size);  \
-        if (NULL == var) {                \
-            do {                          \
-                __VA_ARGS__;              \
-            } while (0);                  \
-            goto done;                    \
-        }                                 \
+#ifndef CLI_MAX_MALLOC_OR_GOTO_DONE
+/**
+ * @brief Wrapper around malloc that limits how much may be allocated to CLI_MAX_ALLOCATION.
+ *
+ * This macro requires `goto done;` error handling.
+ *
+ * @param var   The variable to assign the allocated memory to.
+ * @param size  The size of the memory to allocate.
+ * @param ...   The error handling code to execute if the allocation fails.
+ */
+#define CLI_MAX_MALLOC_OR_GOTO_DONE(var, size, ...) \
+    do {                                            \
+        var = cli_max_malloc(size);                 \
+        if (NULL == var) {                          \
+            do {                                    \
+                __VA_ARGS__;                        \
+            } while (0);                            \
+            goto done;                              \
+        }                                           \
     } while (0)
 #endif
 
-#ifndef VERIFY_POINTER
-#define VERIFY_POINTER(ptr, ...) \
-    do {                         \
-        if (NULL == ptr) {       \
-            do {                 \
-                __VA_ARGS__;     \
-            } while (0);         \
-            goto done;           \
-        }                        \
+#ifndef CLI_CALLOC_OR_GOTO_DONE
+/**
+ * @brief Wrapper around calloc that will `goto done;` if the allocation fails.
+ *
+ * This macro requires `goto done;` error handling.
+ *
+ * @param var   The variable to assign the allocated memory to.
+ * @param nmemb The number of elements to allocate.
+ * @param size  The size of each element.
+ * @param ...   The error handling code to execute if the allocation fails.
+ */
+#define CLI_CALLOC_OR_GOTO_DONE(var, nmemb, size, ...) \
+    do {                                               \
+        (var) = calloc(nmemb, size);                   \
+        if (NULL == var) {                             \
+            do {                                       \
+                __VA_ARGS__;                           \
+            } while (0);                               \
+            goto done;                                 \
+        }                                              \
+    } while (0)
+#endif
+
+#ifndef CLI_MAX_CALLOC_OR_GOTO_DONE
+/**
+ * @brief Wrapper around calloc that limits how much may be allocated to CLI_MAX_ALLOCATION.
+ *
+ * This macro requires `goto done;` error handling.
+ *
+ * @param var   The variable to assign the allocated memory to.
+ * @param nmemb The number of elements to allocate.
+ * @param size  The size of each element.
+ * @param ...   The error handling code to execute if the allocation fails.
+ */
+#define CLI_MAX_CALLOC_OR_GOTO_DONE(var, nmemb, size, ...) \
+    do {                                                   \
+        (var) = cli_max_calloc(nmemb, size);               \
+        if (NULL == var) {                                 \
+            do {                                           \
+                __VA_ARGS__;                               \
+            } while (0);                                   \
+            goto done;                                     \
+        }                                                  \
+    } while (0)
+#endif
+
+#ifndef CLI_VERIFY_POINTER_OR_GOTO_DONE
+/**
+ * @brief Wrapper around a NULL-check that will `goto done;` if the pointer is NULL.
+ *
+ * This macro requires `goto done;` error handling.
+ *
+ * @param ptr   The pointer to verify.
+ * @param ...   The error handling code to execute if the pointer is NULL.
+ */
+#define CLI_VERIFY_POINTER_OR_GOTO_DONE(ptr, ...) \
+    do {                                          \
+        if (NULL == ptr) {                        \
+            do {                                  \
+                __VA_ARGS__;                      \
+            } while (0);                          \
+            goto done;                            \
+        }                                         \
     } while (0)
 #endif
 
@@ -1319,37 +1448,48 @@ uint8_t cli_set_debug_flag(uint8_t debug_flag);
  *
  * IMPORTANT: This differs from realloc() in that if size==0, it will NOT free the ptr.
  *
- * NOTE: cli_realloc() will NOT free ptr if size==0. It is safe to free ptr after `done:`.
+ * NOTE: cli_max_realloc() will NOT free ptr if size==0. It is safe to free ptr after `done:`.
  *
- * @param ptr
- * @param size
- * @return void*
+ * @param ptr   The pointer to realloc.
+ * @param size  The size of the memory to allocate.
+ * @param ...   The error handling code to execute if the allocation fails.
  */
-#ifndef CLI_REALLOC
-#define CLI_REALLOC(ptr, size, ...)          \
-    do {                                     \
-        void *vTmp = cli_realloc(ptr, size); \
-        if (NULL == vTmp) {                  \
-            do {                             \
-                __VA_ARGS__;                 \
-            } while (0);                     \
-            goto done;                       \
-        }                                    \
-        ptr = vTmp;                          \
+#ifndef CLI_MAX_REALLOC_OR_GOTO_DONE
+#define CLI_MAX_REALLOC_OR_GOTO_DONE(ptr, size, ...)     \
+    do {                                                 \
+        void *vTmp = cli_max_realloc((void *)ptr, size); \
+        if (NULL == vTmp) {                              \
+            do {                                         \
+                __VA_ARGS__;                             \
+            } while (0);                                 \
+            goto done;                                   \
+        }                                                \
+        ptr = vTmp;                                      \
     } while (0)
 #endif
 
-/*This is a duplicate from other PR's.*/
-#ifndef CLI_STRDUP
-#define CLI_STRDUP(buf, var, ...) \
-    do {                          \
-        var = cli_strdup(buf);    \
-        if (NULL == var) {        \
-            do {                  \
-                __VA_ARGS__;      \
-            } while (0);          \
-            goto done;            \
-        }                         \
+/**
+ * @brief Wrapper around realloc that, unlike some variants of realloc, will not free the ptr if size==0.
+ *
+ * IMPORTANT: This differs from realloc() in that if size==0, it will NOT free the ptr.
+ *
+ * NOTE: cli_safer_realloc() will NOT free ptr if size==0. It is safe to free ptr after `done:`.
+ *
+ * @param ptr   The pointer to realloc.
+ * @param size  The size of the memory to allocate.
+ * @param ...   The error handling code to execute if the allocation fails.
+ */
+#ifndef CLI_SAFER_REALLOC_OR_GOTO_DONE
+#define CLI_SAFER_REALLOC_OR_GOTO_DONE(ptr, size, ...)     \
+    do {                                                   \
+        void *vTmp = cli_safer_realloc((void *)ptr, size); \
+        if (NULL == vTmp) {                                \
+            do {                                           \
+                __VA_ARGS__;                               \
+            } while (0);                                   \
+            goto done;                                     \
+        }                                                  \
+        ptr = vTmp;                                        \
     } while (0)
 #endif
 

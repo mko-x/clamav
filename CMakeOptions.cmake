@@ -29,6 +29,7 @@ set(DISABLE_MPOOL
 set(BYTECODE_RUNTIME
     "interpreter" CACHE STRING
     "Bytecode Runtime, may be: 'llvm', 'interpreter', 'none'.")
+set_property(CACHE BYTECODE_RUNTIME PROPERTY STRINGS llvm interpreter none)
 
 option(OPTIMIZE
     "Allow compiler optimizations.  Set to OFF to disable (i.e. to set -O0)."
@@ -64,9 +65,6 @@ option(ENABLE_FUZZ
 
 option(ENABLE_EXTERNAL_MSPACK
     "Use external mspack instead of internal libclammspack.")
-
-option(ENABLE_EXTERNAL_TOMSFASTMATH
-    "Use external TomsFastMath instead of compiling vendored source into libclamav.")
 
 option(ENABLE_JSON_SHARED
     "Prefer linking with libjson-c shared library instead of static."
@@ -122,3 +120,6 @@ option(ENABLE_SYSTEMD
 #  Rust Targets:  https://doc.rust-lang.org/nightly/rustc/platform-support.html
 option(RUST_COMPILER_TARGET
     "Use a custom target triple to build the Rust components. Needed for cross-compiling.")
+
+option(DO_NOT_SET_RPATH
+    "Don't set the RPATH on UNIX systems.")

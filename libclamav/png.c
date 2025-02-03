@@ -1,5 +1,5 @@
 /*
- *   Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *   Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *   Copyright (C) 2011-2013 Sourcefire, Inc.
  *   Copyright (C) 1995-2007 by Alexander Lehmann <lehmann@usa.net>,
  *                              Andreas Dilger <adilger@enel.ucalgary.ca>,
@@ -77,7 +77,7 @@ typedef struct __attribute__((packed)) {
 
 cl_error_t cli_parsepng(cli_ctx *ctx)
 {
-    cl_error_t status = CL_ERROR;
+    cl_error_t status = CL_SUCCESS;
 
     uint64_t chunk_data_length = 0;
     char chunk_type[5]         = {'\0', '\0', '\0', '\0', '\0'};
@@ -114,8 +114,7 @@ cl_error_t cli_parsepng(cli_ctx *ctx)
         if (chunk_data_length > (uint64_t)0x7fffffff) {
             cli_dbgmsg("PNG: invalid chunk length (too large): 0x" STDx64 "\n", chunk_data_length);
             if (SCAN_HEURISTIC_BROKEN_MEDIA) {
-                cli_append_possibly_unwanted(ctx, "Heuristics.Broken.Media.PNG.InvalidChunkLength");
-                status = CL_EPARSE;
+                status = cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Media.PNG.InvalidChunkLength");
             }
             goto scan_overlay;
         }
@@ -123,8 +122,7 @@ cl_error_t cli_parsepng(cli_ctx *ctx)
         if (fmap_readn(map, chunk_type, offset, PNG_CHUNK_TYPE_SIZE) != PNG_CHUNK_TYPE_SIZE) {
             cli_dbgmsg("PNG: EOF while reading chunk type\n");
             if (SCAN_HEURISTIC_BROKEN_MEDIA) {
-                cli_append_possibly_unwanted(ctx, "Heuristics.Broken.Media.PNG.EOFReadingChunkType");
-                status = CL_EPARSE;
+                status = cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Media.PNG.EOFReadingChunkType");
             }
             goto scan_overlay;
         }
@@ -139,10 +137,9 @@ cl_error_t cli_parsepng(cli_ctx *ctx)
         if (chunk_data_length > 0) {
             ptr = (uint8_t *)fmap_need_off_once(map, offset, chunk_data_length);
             if (NULL == ptr) {
-                cli_warnmsg("PNG: Unexpected early end-of-file.\n");
+                cli_dbgmsg("PNG: Unexpected early end-of-file.\n");
                 if (SCAN_HEURISTIC_BROKEN_MEDIA) {
-                    cli_append_possibly_unwanted(ctx, "Heuristics.Broken.Media.PNG.EOFReadingChunk");
-                    status = CL_EPARSE;
+                    status = cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Media.PNG.EOFReadingChunk");
                 }
                 goto scan_overlay;
             }
@@ -260,20 +257,12 @@ cl_error_t cli_parsepng(cli_ctx *ctx)
             /*------*
              | tRNS |
              *------*/
-
-            if (color_type == 3) {
-                if ((chunk_data_length > 256 || chunk_data_length > num_palette_entries) && !have_PLTE) {
-                    status = cli_append_virus(ctx, "Heuristics.PNG.CVE-2004-0597");
-                    goto done;
-                }
-            }
         }
 
         if (fmap_readn(map, &chunk_crc, offset, PNG_CHUNK_CRC_SIZE) != PNG_CHUNK_CRC_SIZE) {
             cli_dbgmsg("PNG: EOF while reading chunk crc\n");
             if (SCAN_HEURISTIC_BROKEN_MEDIA) {
-                cli_append_possibly_unwanted(ctx, "Heuristics.Broken.Media.PNG.EOFReadingChunkCRC");
-                status = CL_EPARSE;
+                status = cli_append_potentially_unwanted(ctx, "Heuristics.Broken.Media.PNG.EOFReadingChunkCRC");
             }
             goto scan_overlay;
         }
@@ -294,19 +283,15 @@ cl_error_t cli_parsepng(cli_ctx *ctx)
     }
 
 scan_overlay:
-    if (status == CL_EPARSE) {
-        /* We added with cli_append_possibly_unwanted so it will alert at the end if nothing else matches. */
-        status = CL_CLEAN;
-    }
 
-    /* Check if there's an overlay, and scan it if one exists. */
-    if (map->len > offset) {
-        cli_dbgmsg("PNG: Found " STDu64 " additional data after end of PNG! Scanning as a nested file.\n", map->len - offset);
-        status = cli_magic_scan_nested_fmap_type(map, (size_t)offset, map->len - offset, ctx, CL_TYPE_ANY, NULL);
-        goto done;
+    if (CL_SUCCESS == status) {
+        /* Check if there's an overlay, and scan it if one exists. */
+        if (map->len > offset) {
+            cli_dbgmsg("PNG: Found " STDu64 " additional data after end of PNG! Scanning as a nested file.\n", map->len - offset);
+            status = cli_magic_scan_nested_fmap_type(map, (size_t)offset, map->len - offset, ctx, CL_TYPE_ANY, NULL, LAYER_ATTRIBUTES_NONE);
+            goto done;
+        }
     }
-
-    status = CL_CLEAN;
 
 done:
 

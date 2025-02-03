@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2013-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2013-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *  Copyright (C) 2013 Sourcefire, Inc.
  *
  *  Authors: Steven Morgan <smorgan@sourcefire.com>
@@ -27,7 +27,6 @@
 #include "xar.h"
 #include "fmap.h"
 
-#if HAVE_LIBXML2
 #include <libxml/xmlreader.h>
 #include "clamav.h"
 #include "str.h"
@@ -308,9 +307,7 @@ static int xar_scan_subdocuments(xmlTextReaderPtr reader, cli_ctx *ctx)
             }
             subdoc_len = xmlStrlen(subdoc);
             cli_dbgmsg("cli_scanxar: in-memory scan of xml subdocument, len %i.\n", subdoc_len);
-            rc = cli_magic_scan_buff(subdoc, subdoc_len, ctx, NULL);
-            if (rc == CL_VIRUS && SCAN_ALLMATCHES)
-                rc = CL_SUCCESS;
+            rc = cli_magic_scan_buff(subdoc, subdoc_len, ctx, NULL, LAYER_ATTRIBUTES_NONE);
 
             /* make a file to leave if --leave-temps in effect */
             if (ctx->engine->keeptmp) {
@@ -411,8 +408,6 @@ static int xar_hash_check(int hash, const void *result, const void *expected)
     return memcmp(result, expected, len);
 }
 
-#endif
-
 /*
   cli_scanxar - scan an xar archive.
   Parameters:
@@ -425,7 +420,7 @@ int cli_scanxar(cli_ctx *ctx)
     int rc                      = CL_SUCCESS;
     unsigned int cksum_fails    = 0;
     unsigned int extract_errors = 0;
-#if HAVE_LIBXML2
+
     int fd = -1;
     struct xar_header hdr;
     fmap_t *map = ctx->fmap;
@@ -475,9 +470,9 @@ int cli_scanxar(cli_ctx *ctx)
         return CL_EREAD;
     }
     strm.avail_in = hdr.toc_length_compressed;
-    toc           = cli_malloc(hdr.toc_length_decompressed + 1);
+    toc           = cli_max_malloc(hdr.toc_length_decompressed + 1);
     if (toc == NULL) {
-        cli_dbgmsg("cli_scanxar: cli_malloc fails on TOC decompress buffer.\n");
+        cli_dbgmsg("cli_scanxar: cli_max_malloc fails on TOC decompress buffer.\n");
         return CL_EMEM;
     }
     toc[hdr.toc_length_decompressed] = '\0';
@@ -517,10 +512,9 @@ int cli_scanxar(cli_ctx *ctx)
 
     /* scan the xml */
     cli_dbgmsg("cli_scanxar: scanning xar TOC xml in memory.\n");
-    rc = cli_magic_scan_buff(toc, hdr.toc_length_decompressed, ctx, NULL);
+    rc = cli_magic_scan_buff(toc, hdr.toc_length_decompressed, ctx, NULL, LAYER_ATTRIBUTES_NONE);
     if (rc != CL_SUCCESS) {
-        if (rc != CL_VIRUS || !SCAN_ALLMATCHES)
-            goto exit_toc;
+        goto exit_toc;
     }
 
     /* make a file to leave if --leave-temps in effect */
@@ -846,16 +840,9 @@ int cli_scanxar(cli_ctx *ctx)
                 }
             }
 
-            rc = cli_magic_scan_desc(fd, tmpname, ctx, NULL); /// TODO: collect file names in xar_get_toc_data_values()
+            rc = cli_magic_scan_desc(fd, tmpname, ctx, NULL, LAYER_ATTRIBUTES_NONE); /// TODO: collect file names in xar_get_toc_data_values()
             if (rc != CL_SUCCESS) {
-                if (rc == CL_VIRUS) {
-                    cli_dbgmsg("cli_scanxar: Infected with %s\n", cli_get_last_virus(ctx));
-                    if (!SCAN_ALLMATCHES)
-                        goto exit_tmpfile;
-                } else if (rc != CL_BREAK) {
-                    cli_dbgmsg("cli_scanxar: cli_magic_scan_desc error %i\n", rc);
-                    goto exit_tmpfile;
-                }
+                goto exit_tmpfile;
             }
         }
 
@@ -888,9 +875,7 @@ exit_toc:
     free(toc);
     if (rc == CL_BREAK)
         rc = CL_SUCCESS;
-#else
-    cli_dbgmsg("cli_scanxar: can't scan xar files, need libxml2.\n");
-#endif
+
     if (cksum_fails + extract_errors != 0) {
         cli_dbgmsg("cli_scanxar: %u checksum errors and %u extraction errors.\n",
                    cksum_fails, extract_errors);

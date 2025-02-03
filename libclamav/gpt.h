@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2014-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2014-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *
  *  Authors: Kevin Lin <klin@sourcefire.com>
  *
@@ -25,7 +25,7 @@
 #include "clamav-config.h"
 #endif
 
-#include "clamav-types.h"
+#include "clamav.h"
 #include "others.h"
 
 /* GPT sector size is normally 512 bytes be can be set to much larger
@@ -94,6 +94,6 @@ struct gpt_partition_entry {
 #endif
 
 size_t gpt_detect_size(fmap_t *map);
-int cli_scangpt(cli_ctx *ctx, size_t sectorsize);
+cl_error_t cli_scangpt(cli_ctx *ctx, size_t sectorsize);
 
 #endif

@@ -1,4 +1,4 @@
-# Copyright (C) 2020-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+# Copyright (C) 2020-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
 
 if(WIN32)
     add_definitions(-DWIN32_LEAN_AND_MEAN)
@@ -54,6 +54,7 @@ target_link_libraries( clamd
         ClamAV::common )
 if(WIN32)
     install(TARGETS clamd DESTINATION . COMPONENT programs)
+    install(FILES $<TARGET_PDB_FILE:clamd> DESTINATION . OPTIONAL COMPONENT programs)
 else()
     install(TARGETS clamd DESTINATION ${CMAKE_INSTALL_SBINDIR} COMPONENT programs)
 endif()

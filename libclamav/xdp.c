@@ -42,17 +42,17 @@
 #include <unistd.h>
 #endif
 #include <errno.h>
+
 #include "xar.h"
 #include "fmap.h"
-#if HAVE_LIBXML2
+
 #include <libxml/xmlreader.h>
-#endif
+
 #include "clamav.h"
 #include "str.h"
 #include "scanners.h"
 #include "conv.h"
 #include "xdp.h"
-#include "bignum.h"
 #include "filetypes.h"
 
 static char *dump_xdp(cli_ctx *ctx, const char *start, size_t sz);
@@ -92,7 +92,6 @@ static char *dump_xdp(cli_ctx *ctx, const char *start, size_t sz)
 
 cl_error_t cli_scanxdp(cli_ctx *ctx)
 {
-#if HAVE_LIBXML2
     xmlTextReaderPtr reader = NULL;
     const char *buf;
     const xmlChar *name, *value;
@@ -159,9 +158,9 @@ cl_error_t cli_scanxdp(cli_ctx *ctx)
                         break;
                     }
 
-                    rc = cli_magic_scan_buff(decoded, decodedlen, ctx, NULL);
+                    rc = cli_magic_scan_buff(decoded, decodedlen, ctx, NULL, LAYER_ATTRIBUTES_NONE);
                     free(decoded);
-                    if (rc != CL_SUCCESS || rc == CL_BREAK) {
+                    if (rc != CL_SUCCESS) {
                         xmlFree((void *)value);
                         break;
                     }
@@ -175,7 +174,4 @@ cl_error_t cli_scanxdp(cli_ctx *ctx)
     xmlFreeTextReader(reader);
 
     return rc;
-#else
-    return CL_SUCCESS;
-#endif
 }

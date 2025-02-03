@@ -1,7 +1,7 @@
 /*
  *  Extract XLM (Excel 4.0) macro source code for component MS Office Documents
  *
- *  Copyright (C) 2020-2022 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
+ *  Copyright (C) 2020-2024 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  *
  *  Authors: Jonas Zaddach
  *
@@ -3785,7 +3785,7 @@ typedef enum {
  * @param data                      data buffer starting with the record header
  * @param data_len                  length of the buffer
  * @param[in,out] unpacked_header   fill this
- * @return cl_error_t               CL_SUCCESS if successfull, else some error code.
+ * @return cl_error_t               CL_SUCCESS if successful, else some error code.
  */
 static cl_error_t
 read_office_art_record_header(const unsigned char *data, size_t data_len, struct OfficeArtRecordHeader_Unpacked *unpacked_header)
@@ -4215,7 +4215,6 @@ cl_error_t process_blip_record(struct OfficeArtRecordHeader_Unpacked *rh, const 
 {
     cl_error_t status = CL_EARG;
     cl_error_t ret;
-    bool virus_found = false;
 
     char *extracted_image_filepath = NULL;
     int extracted_image_tempfd     = -1;
@@ -4334,11 +4333,11 @@ cl_error_t process_blip_record(struct OfficeArtRecordHeader_Unpacked *rh, const 
 
         if (ctx->engine->keeptmp) {
             /* Drop a temp file and scan that */
-            if ((ret = cli_gentempfd_with_prefix(
-                     ctx->sub_tmpdir,
-                     extracted_image_type,
-                     &extracted_image_filepath,
-                     &extracted_image_tempfd)) != CL_SUCCESS) {
+            if (CL_SUCCESS != (ret = cli_gentempfd_with_prefix(
+                                   ctx->sub_tmpdir,
+                                   extracted_image_type,
+                                   &extracted_image_filepath,
+                                   &extracted_image_tempfd))) {
                 cli_warnmsg("Failed to create temp file for extracted %s file\n", extracted_image_type);
                 status = CL_EOPEN;
                 goto done;
@@ -4350,17 +4349,15 @@ cl_error_t process_blip_record(struct OfficeArtRecordHeader_Unpacked *rh, const 
                 goto done;
             }
 
-            ret = cli_magic_scan_desc_type(extracted_image_tempfd, extracted_image_filepath, ctx, CL_TYPE_ANY, NULL);
+            ret = cli_magic_scan_desc_type(extracted_image_tempfd, extracted_image_filepath, ctx, CL_TYPE_ANY,
+                                           NULL, LAYER_ATTRIBUTES_NONE);
         } else {
             /* Scan the buffer */
-            ret = cli_magic_scan_buff(start_of_image, size_of_image, ctx, NULL);
+            ret = cli_magic_scan_buff(start_of_image, size_of_image, ctx, NULL, LAYER_ATTRIBUTES_NONE);
         }
-        if (ret == CL_VIRUS) {
-            if (!SCAN_ALLMATCHES) {
-                status = CL_VIRUS;
-                goto done;
-            }
-            virus_found = true;
+        if (CL_SUCCESS != ret) {
+            status = ret;
+            goto done;
         }
     }
 
@@ -4381,9 +4378,6 @@ done:
         free(extracted_image_filepath);
     }
 
-    if (virus_found) {
-        status = CL_VIRUS;
-    }
     return status;
 }
 
@@ -4398,8 +4392,6 @@ done:
 cl_error_t process_blip_store_container(const unsigned char *blip_store_container, size_t blip_store_container_len, cli_ctx *ctx)
 {
     cl_error_t status = CL_EARG;
-    cl_error_t ret;
-    bool virus_found = false;
 
     struct OfficeArtRecordHeader_Unpacked rh;
     const unsigned char *index = blip_store_container;
@@ -4478,13 +4470,9 @@ cl_error_t process_blip_store_container(const unsigned char *blip_store_containe
                         cli_dbgmsg("process_blip_store_container: Failed to get header\n");
                         goto done;
                     }
-                    ret = process_blip_record(&embeddedBlip_rh, embeddedBlip, embeddedBlip_size, ctx);
-                    if (ret == CL_VIRUS) {
-                        if (!SCAN_ALLMATCHES) {
-                            status = CL_VIRUS;
-                            goto done;
-                        }
-                        virus_found = true;
+                    status = process_blip_record(&embeddedBlip_rh, embeddedBlip, embeddedBlip_size, ctx);
+                    if (CL_SUCCESS != status) {
+                        goto done;
                     }
                 }
             }
@@ -4492,13 +4480,9 @@ cl_error_t process_blip_store_container(const unsigned char *blip_store_containe
         } else if ((0xF018 <= rh.recType) && (0xF117 >= rh.recType)) {
             /* it's an OfficeArtBlip record */
             cli_dbgmsg("process_blip_store_container: Found a Blip record\n");
-            ret = process_blip_record(&rh, index, remaining, ctx);
-            if (ret == CL_VIRUS) {
-                if (!SCAN_ALLMATCHES) {
-                    status = CL_VIRUS;
-                    goto done;
-                }
-                virus_found = true;
+            status = process_blip_record(&rh, index, remaining, ctx);
+            if (CL_SUCCESS != status) {
+                goto done;
             }
 
         } else {
@@ -4518,17 +4502,12 @@ cl_error_t process_blip_store_container(const unsigned char *blip_store_containe
 
 done:
 
-    if (virus_found) {
-        status = CL_VIRUS;
-    }
     return status;
 }
 
 cl_error_t cli_extract_images_from_drawing_group(const unsigned char *drawinggroup, size_t drawinggroup_len, cli_ctx *ctx)
 {
     cl_error_t status = CL_EARG;
-    cl_error_t ret;
-    bool virus_found = false;
 
     struct OfficeArtRecordHeader_Unpacked rh;
     const unsigned char *index = drawinggroup;
@@ -4604,13 +4583,9 @@ cl_error_t cli_extract_images_from_drawing_group(const unsigned char *drawinggro
                 blip_store_container_len = rh.recLen;
             }
 
-            ret = process_blip_store_container(start_of_blip_store_container, blip_store_container_len, ctx);
-            if (ret == CL_VIRUS) {
-                if (!SCAN_ALLMATCHES) {
-                    status = CL_VIRUS;
-                    goto done;
-                }
-                virus_found = true;
+            status = process_blip_store_container(start_of_blip_store_container, blip_store_container_len, ctx);
+            if (CL_SUCCESS != status) {
+                goto done;
             }
         }
 
@@ -4625,9 +4600,7 @@ cl_error_t cli_extract_images_from_drawing_group(const unsigned char *drawinggro
     status = CL_SUCCESS;
 
 done:
-    if (virus_found) {
-        status = CL_VIRUS;
-    }
+
     return status;
 }
 
@@ -4663,7 +4636,7 @@ cl_error_t cli_extract_xlm_macros_and_images(const char *dir, cli_ctx *ctx, char
 
     if (in_fd == -1) {
         cli_dbgmsg("[cli_extract_xlm_macros_and_images] Failed to open input file\n");
-        /* Don't return an error. If the file is missing, an error probably occured
+        /* Don't return an error. If the file is missing, an error probably occurred
          * earlier, such as a UTF8 conversion error in parse_formula() and so the file was never written.
          * There are no macros to scan, so report SUCCESS / CLEAN. */
         goto done;
@@ -4817,7 +4790,7 @@ cl_error_t cli_extract_xlm_macros_and_images(const char *dir, cli_ctx *ctx, char
                 } else {
                     /* already found the beginning of a drawing group, extract the remaining chunks */
                     drawinggroup_len += biff_header.length;
-                    CLI_REALLOC(drawinggroup, drawinggroup_len, status = CL_EMEM);
+                    CLI_MAX_REALLOC_OR_GOTO_DONE(drawinggroup, drawinggroup_len, status = CL_EMEM);
                     memcpy(drawinggroup + (drawinggroup_len - biff_header.length), data, biff_header.length);
                     // cli_dbgmsg("Collected %d drawing group bytes\n", biff_header.length);
                 }
@@ -4828,7 +4801,7 @@ cl_error_t cli_extract_xlm_macros_and_images(const char *dir, cli_ctx *ctx, char
                     (NULL != drawinggroup)) {
                     /* already found the beginning of an image, extract the remaining chunks */
                     drawinggroup_len += biff_header.length;
-                    CLI_REALLOC(drawinggroup, drawinggroup_len, status = CL_EMEM);
+                    CLI_MAX_REALLOC_OR_GOTO_DONE(drawinggroup, drawinggroup_len, status = CL_EMEM);
                     memcpy(drawinggroup + (drawinggroup_len - biff_header.length), data, biff_header.length);
                     // cli_dbgmsg("Collected %d image bytes\n", biff_header.length);
                 }
@@ -4976,14 +4949,15 @@ cl_error_t cli_extract_xlm_macros_and_images(const char *dir, cli_ctx *ctx, char
         goto done;
     }
 
-    if (cli_scan_desc(out_fd, ctx, CL_TYPE_SCRIPT, 0, NULL, AC_SCAN_VIR, NULL, NULL) == CL_VIRUS) {
+    if (CL_VIRUS == cli_scan_desc(out_fd, ctx, CL_TYPE_SCRIPT, false, NULL, AC_SCAN_VIR,
+                                  NULL, NULL, LAYER_ATTRIBUTES_NONE)) {
         status = CL_VIRUS;
         goto done;
     }
 
     /* If a read failed, return with an error. */
     if (size_read == (size_t)-1) {
-        cli_dbgmsg("cli_extract_xlm_macros_and_images: Read error occured when trying to read BIFF header. Truncated or malformed XLM macro file?\n");
+        cli_dbgmsg("cli_extract_xlm_macros_and_images: Read error occurred when trying to read BIFF header. Truncated or malformed XLM macro file?\n");
         status = CL_EREAD;
         goto done;
     }
@@ -4994,8 +4968,8 @@ cl_error_t cli_extract_xlm_macros_and_images(const char *dir, cli_ctx *ctx, char
          * If we fail to extract images, that's fine.
          */
         ret = cli_extract_images_from_drawing_group(drawinggroup, drawinggroup_len, ctx);
-        if (ret == CL_VIRUS) {
-            status = CL_VIRUS;
+        if (CL_SUCCESS != ret) {
+            status = ret;
             goto done;
         }
     }
@@ -5003,7 +4977,7 @@ cl_error_t cli_extract_xlm_macros_and_images(const char *dir, cli_ctx *ctx, char
     status = CL_SUCCESS;
 
 done:
-    FREE(drawinggroup);
+    CLI_FREE_AND_SET_NULL(drawinggroup);
 
     if (in_fd != -1) {
         close(in_fd);
@@ -5018,9 +4992,12 @@ done:
         out_fd = -1;
     }
 
-    FREE(data);
+    CLI_FREE_AND_SET_NULL(data);
 
-    FREE(tempfile);
+    if (tempfile && !ctx->engine->keeptmp) {
+        remove(tempfile);
+    }
+    CLI_FREE_AND_SET_NULL(tempfile);
 
     return status;
 }
